@@ -46,6 +46,10 @@ custom_voices/
 # OS
 .DS_Store
 Thumbs.db
+# macOS AppleDouble / resource fork files (._filename)
+._*
+.AppleDouble
+.LSOverride
 
 # Node.js
 node_modules/
