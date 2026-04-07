@@ -79,8 +79,10 @@ class Qwen3Backend(TTSBackend):
     """
     TTS backend using Qwen3-TTS (CustomVoice for built-in, Base for cloning).
 
-    Lazy-loads CustomVoice and Base models on first use; unloads after idle
-    (configurable via TTS_MODEL_IDLE_UNLOAD_SECONDS, default 15s) to free memory.
+    Lazy-loads models on first use. Idle unload runs only after ``generate()``
+    fully completes (configurable via TTS_MODEL_IDLE_UNLOAD_SECONDS, default 15s),
+    so timers never fire mid-synthesis. Overlapping calls use an in-flight counter
+    so unload runs only when no generation is active.
     Caches voice_clone_prompt per ref_audio_path for custom voices.
     """
 
@@ -111,6 +113,7 @@ class Qwen3Backend(TTSBackend):
         self._clone_prompt_cache: Dict[str, Any] = {}
         self._lock = threading.Lock()
         self._unload_timer: Optional[threading.Timer] = None
+        self._inflight_generations: int = 0
         self._idle_unload_seconds: int = getattr(
             config, "TTS_MODEL_IDLE_UNLOAD_SECONDS", 15
         )
@@ -133,6 +136,8 @@ class Qwen3Backend(TTSBackend):
         with self._lock:
             if self._unload_timer is not None:
                 self._unload_timer = None
+            if self._inflight_generations > 0:
+                return
             if (
                 self._custom_voice_model_instance is None
                 and self._base_model_instance is None
@@ -193,6 +198,8 @@ class Qwen3Backend(TTSBackend):
         """Schedule model unload after idle timeout. Call with lock held."""
         if self._idle_unload_seconds <= 0:
             return
+        if self._inflight_generations > 0:
+            return
         if self._unload_timer is not None:
             self._unload_timer.cancel()
             self._unload_timer = None
@@ -203,11 +210,20 @@ class Qwen3Backend(TTSBackend):
         self._unload_timer.daemon = True
         self._unload_timer.start()
 
+    def _begin_generation_locked(self) -> None:
+        """Cancel pending idle unload and mark a generation as active. Call with lock held."""
+        if self._unload_timer is not None:
+            self._unload_timer.cancel()
+            self._unload_timer = None
+        self._inflight_generations += 1
+
+    def _end_generation_locked(self) -> None:
+        """Mark generation finished; schedule idle unload when no callers remain. Lock held."""
+        self._inflight_generations = max(0, self._inflight_generations - 1)
+        self._schedule_unload()
+
     def _get_custom_voice_model(self):
         with self._lock:
-            if self._unload_timer is not None:
-                self._unload_timer.cancel()
-                self._unload_timer = None
             if self._custom_voice_model_instance is None:
                 from qwen_tts import Qwen3TTSModel
 
@@ -216,14 +232,10 @@ class Qwen3Backend(TTSBackend):
                     self._custom_voice_model,
                     **self._model_kwargs(),
                 )
-            self._schedule_unload()
             return self._custom_voice_model_instance
 
     def _get_base_model(self):
         with self._lock:
-            if self._unload_timer is not None:
-                self._unload_timer.cancel()
-                self._unload_timer = None
             if self._base_model_instance is None:
                 from qwen_tts import Qwen3TTSModel
 
@@ -232,14 +244,10 @@ class Qwen3Backend(TTSBackend):
                     self._base_model,
                     **self._model_kwargs(),
                 )
-            self._schedule_unload()
             return self._base_model_instance
 
     def _get_voice_design_model(self):
         with self._lock:
-            if self._unload_timer is not None:
-                self._unload_timer.cancel()
-                self._unload_timer = None
             if self._voice_design_model_instance is None:
                 from qwen_tts import Qwen3TTSModel
 
@@ -248,7 +256,6 @@ class Qwen3Backend(TTSBackend):
                     self._voice_design_model,
                     **self._model_kwargs(),
                 )
-            self._schedule_unload()
             return self._voice_design_model_instance
 
     def _get_or_create_clone_prompt(self, ref_audio_path: Path, ref_text: Optional[str]) -> Any:
@@ -366,36 +373,42 @@ class Qwen3Backend(TTSBackend):
         output_path = Path(output_path)
         output_path.parent.mkdir(parents=True, exist_ok=True)
 
-        total = len(segments)
-        if progress_callback:
-            progress_callback(0, total, "Starting generation...")
-
-        all_wavs: List[np.ndarray] = []
-        sample_rate = 24000
-
-        for i, seg in enumerate(segments):
-            if seg.speaker_index >= len(speaker_refs):
-                raise ValueError(
-                    f"Segment speaker_index {seg.speaker_index} out of range (have {len(speaker_refs)} speaker_refs)"
-                )
-            ref = speaker_refs[seg.speaker_index]
-            wav, sr = self._generate_segment(seg.text, ref, language)
+        with self._lock:
+            self._begin_generation_locked()
+        try:
+            total = len(segments)
             if progress_callback:
-                progress_callback(i + 1, total, f"Generated segment {i + 1} of {total}")
-            if wav is not None and len(wav) > 0:
-                if not all_wavs:
-                    sample_rate = sr
-                elif sr != sample_rate:
-                    logger.warning("Segment sample rate %s != %s; using first segment sr", sr, sample_rate)
-                all_wavs.append(wav.astype(np.float32))
+                progress_callback(0, total, "Starting generation...")
 
-        if not all_wavs:
-            raise RuntimeError("No audio generated from segments")
+            all_wavs: List[np.ndarray] = []
+            sample_rate = 24000
 
-        concatenated = np.concatenate(all_wavs)
-        sf.write(str(output_path), concatenated, sample_rate)
-        logger.info("Wrote Qwen3-TTS output: %s (%s samples, %s Hz)", output_path, len(concatenated), sample_rate)
-        return output_path
+            for i, seg in enumerate(segments):
+                if seg.speaker_index >= len(speaker_refs):
+                    raise ValueError(
+                        f"Segment speaker_index {seg.speaker_index} out of range (have {len(speaker_refs)} speaker_refs)"
+                    )
+                ref = speaker_refs[seg.speaker_index]
+                wav, sr = self._generate_segment(seg.text, ref, language)
+                if progress_callback:
+                    progress_callback(i + 1, total, f"Generated segment {i + 1} of {total}")
+                if wav is not None and len(wav) > 0:
+                    if not all_wavs:
+                        sample_rate = sr
+                    elif sr != sample_rate:
+                        logger.warning("Segment sample rate %s != %s; using first segment sr", sr, sample_rate)
+                    all_wavs.append(wav.astype(np.float32))
+
+            if not all_wavs:
+                raise RuntimeError("No audio generated from segments")
+
+            concatenated = np.concatenate(all_wavs)
+            sf.write(str(output_path), concatenated, sample_rate)
+            logger.info("Wrote Qwen3-TTS output: %s (%s samples, %s Hz)", output_path, len(concatenated), sample_rate)
+            return output_path
+        finally:
+            with self._lock:
+                self._end_generation_locked()
 
 
 def resolve_speaker_to_qwen3_ref(
