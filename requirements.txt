@@ -1,10 +1,16 @@
 # Core dependencies
-huggingface_hub>=0.20.0
+# huggingface_hub range matches transformers 4.57.x and whisperx (hub 1.x breaks those pins).
+huggingface_hub>=0.34.0,<1.0
 torch>=2.0.0
 numpy>=1.24.0
 
+# Qwen3-TTS stack: PyPI qwen-tts pins these; listing them here prevents another package
+# from leaving a stale transformers (ImportError: auto_docstring; check_model_inputs mismatch).
+transformers==4.57.3
+accelerate==1.12.0
+
 # Qwen3-TTS (when TTS_BACKEND=qwen3)
-qwen-tts>=0.0.5
+qwen-tts>=0.1.1
 soundfile>=0.12.0
 
 # Audio quality analysis (background music, noise, recording quality)
