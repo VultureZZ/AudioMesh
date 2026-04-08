@@ -144,6 +144,9 @@ class Config:
     )
     MUSIC_OUTPUT_DIR: Path = Path(os.getenv("MUSIC_OUTPUT_DIR", "outputs/music"))
     MUSIC_REFERENCE_DIR: Path = Path(os.getenv("MUSIC_REFERENCE_DIR", "outputs/music/reference"))
+    # Podcast ad scanner and other audio-tools working files (under outputs/)
+    AUDIO_TOOLS_DIR: Path = Path(os.getenv("AUDIO_TOOLS_DIR", "outputs/audio_tools"))
+    AUDIO_TOOLS_MAX_UPLOAD_MB: int = int(os.getenv("AUDIO_TOOLS_MAX_UPLOAD_MB", "500"))
 
     def __init__(self):
         """Initialize configuration and ensure directories exist."""
@@ -168,6 +171,8 @@ class Config:
             self.MUSIC_OUTPUT_DIR = PROJECT_ROOT / self.MUSIC_OUTPUT_DIR
         if not self.MUSIC_REFERENCE_DIR.is_absolute():
             self.MUSIC_REFERENCE_DIR = PROJECT_ROOT / self.MUSIC_REFERENCE_DIR
+        if not self.AUDIO_TOOLS_DIR.is_absolute():
+            self.AUDIO_TOOLS_DIR = PROJECT_ROOT / self.AUDIO_TOOLS_DIR
 
         # If the user didn't explicitly set REALTIME_VIBEVOICE_REPO_DIR, try a sensible default:
         # prefer a microsoft/VibeVoice checkout if present (it contains the realtime demo server).
@@ -192,6 +197,10 @@ class Config:
         (self.TRANSCRIPTS_DIR / "segments").mkdir(parents=True, exist_ok=True)
         (self.TRANSCRIPTS_DIR / "json").mkdir(parents=True, exist_ok=True)
         (self.TRANSCRIPTS_DIR / "reports").mkdir(parents=True, exist_ok=True)
+        self.AUDIO_TOOLS_DIR.mkdir(parents=True, exist_ok=True)
+        (self.AUDIO_TOOLS_DIR / "jobs").mkdir(parents=True, exist_ok=True)
+        (self.AUDIO_TOOLS_DIR / "exports").mkdir(parents=True, exist_ok=True)
+        (self.OUTPUT_DIR / "isolate_speakers").mkdir(parents=True, exist_ok=True)
 
     @property
     def requires_api_key(self) -> bool:

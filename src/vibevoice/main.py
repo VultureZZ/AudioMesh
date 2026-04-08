@@ -13,6 +13,7 @@ from .middleware.auth import APIKeyAuthMiddleware
 from .middleware.rate_limit import RateLimitMiddleware
 from .routes import speech, voices, podcasts, transcripts, music
 from .routes import realtime_speech
+from .routers import audio_tools
 from .services.realtime_process import realtime_process_manager
 from .services.music_process import music_process_manager
 from .services.transcript_service import transcript_service
@@ -92,6 +93,7 @@ app.include_router(transcripts.router)
 app.include_router(podcast_router)
 app.include_router(podcasts.router)
 app.include_router(music.router)
+app.include_router(audio_tools.router)
 
 
 @app.on_event("shutdown")

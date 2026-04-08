@@ -75,6 +75,120 @@ class OllamaClient:
             logger.warning(f"Ollama connection check failed: {e}")
             return False
 
+    def identify_podcast_ad_segments(
+        self,
+        segments_payload: List[Dict[str, Any]],
+        total_duration_seconds: float,
+        custom_model: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        """
+        Ask the LLM to label advertisement/sponsor intervals from timestamped transcript segments.
+
+        Returns:
+            List of dicts with keys: start_seconds, end_seconds, label, confidence
+        """
+        model = custom_model or self.model
+        payload = {
+            "total_duration_seconds": round(total_duration_seconds, 3),
+            "transcript_segments": segments_payload,
+        }
+        user_text = json.dumps(payload, ensure_ascii=False)
+
+        system = """You analyze podcast transcripts with timestamps. Identify segments that are advertisements, sponsor reads, promotional breaks, paid integrations, or typical host-read ads (e.g. "brought to you by", discount codes, product pitches).
+
+Rules:
+1. Output ONLY valid JSON: a single array of objects. No markdown, no code fences, no commentary.
+2. Each object must have exactly these keys: "start_seconds" (number), "end_seconds" (number), "label" (short string), "confidence" (number from 0 to 1).
+3. Times must be within [0, total_duration_seconds] and start_seconds < end_seconds.
+4. Merge adjacent ad-related sentences into one segment when they belong to the same break.
+5. If there are no ads, return an empty array []."""
+
+        try:
+            response = self.client.post(
+                f"{self.base_url}/api/chat",
+                json={
+                    "model": model,
+                    "messages": [
+                        {"role": "system", "content": system},
+                        {"role": "user", "content": user_text},
+                    ],
+                    "stream": False,
+                    "options": {
+                        "temperature": 0.2,
+                        "top_p": 0.9,
+                    },
+                },
+            )
+            response.raise_for_status()
+            result = response.json()
+            message = result.get("message") or {}
+            raw = (message.get("content") or "").strip()
+            if not raw:
+                raise RuntimeError("Ollama returned empty response for ad detection")
+            parsed = self._parse_ad_segments_json(raw)
+            return self._validate_ad_segment_dicts(parsed, total_duration_seconds)
+        except httpx.HTTPError as e:
+            raise RuntimeError(f"Ollama ad detection request failed: {e}") from e
+        except Exception as e:
+            raise RuntimeError(f"Ollama ad detection failed: {e}") from e
+
+    def _parse_ad_segments_json(self, raw: str) -> Any:
+        cleaned = raw.strip()
+        if cleaned.startswith("```"):
+            lines = cleaned.split("\n")
+            if lines and lines[0].startswith("```"):
+                lines = lines[1:]
+            if lines and lines[-1].strip() == "```":
+                lines = lines[:-1]
+            cleaned = "\n".join(lines).strip()
+        try:
+            return json.loads(cleaned)
+        except json.JSONDecodeError:
+            pass
+        match = re.search(r"\[[\s\S]*\]", cleaned)
+        if match:
+            try:
+                return json.loads(match.group(0))
+            except json.JSONDecodeError:
+                pass
+        raise ValueError("Could not parse JSON array from ad detection response")
+
+    def _validate_ad_segment_dicts(
+        self, parsed: Any, total_duration_seconds: float
+    ) -> List[Dict[str, Any]]:
+        if not isinstance(parsed, list):
+            raise ValueError("Ad detection response must be a JSON array")
+        out: List[Dict[str, Any]] = []
+        td = max(0.0, float(total_duration_seconds))
+        for item in parsed:
+            if not isinstance(item, dict):
+                continue
+            try:
+                start = float(item.get("start_seconds", item.get("start", 0)))
+                end = float(item.get("end_seconds", item.get("end", 0)))
+            except (TypeError, ValueError):
+                continue
+            label = str(item.get("label", "ad")).strip() or "ad"
+            try:
+                conf = float(item.get("confidence", 0.5))
+            except (TypeError, ValueError):
+                conf = 0.5
+            conf = max(0.0, min(1.0, conf))
+            start = max(0.0, min(start, td))
+            end = max(0.0, min(end, td))
+            if end <= start or end - start < 0.05:
+                continue
+            out.append(
+                {
+                    "start_seconds": start,
+                    "end_seconds": end,
+                    "label": label,
+                    "confidence": conf,
+                }
+            )
+        out.sort(key=lambda x: x["start_seconds"])
+        return out
+
     def generate_script(
         self,
         article_text: str,

@@ -468,3 +468,65 @@ export interface TranscriptListResponse {
   limit: number;
   offset: number;
 }
+
+export interface AdSegmentItem {
+  start_seconds: number;
+  end_seconds: number;
+  label: string;
+  confidence: number;
+}
+
+export interface PodcastAdScanSubmitResponse {
+  job_id: string;
+  status: string;
+  progress_pct: number;
+}
+
+export interface PodcastAdScanStatusResponse {
+  job_id: string;
+  status: string;
+  progress_pct: number;
+  current_stage?: string | null;
+  ad_segments?: AdSegmentItem[] | null;
+  duration_seconds?: number | null;
+  error?: string | null;
+}
+
+export interface PodcastAdExportResponse {
+  download_url: string;
+  filename: string;
+  duration_seconds: number;
+  file_size_bytes: number;
+}
+
+export interface SpeakerIsolationClipItem {
+  clip_id: string;
+  filename: string;
+  start_seconds: number;
+  end_seconds: number;
+  duration_seconds: number;
+  download_url: string;
+}
+
+export interface SpeakerIsolationSpeakerItem {
+  speaker_id: string;
+  label: string;
+  total_speaking_seconds: number;
+  clips: SpeakerIsolationClipItem[];
+}
+
+export interface SpeakerIsolationStatusResponse {
+  job_id: string;
+  status: string;
+  progress_pct: number;
+  current_stage?: string | null;
+  speakers?: SpeakerIsolationSpeakerItem[] | null;
+  duration_seconds?: number | null;
+  error?: string | null;
+}
+
+export interface SpeakerIsolationSubmitResponse {
+  job_id: string;
+  status: string;
+  progress_pct: number;
+}

@@ -501,3 +501,106 @@ class VoiceUpdateResponse(BaseModel):
     success: bool = Field(..., description="Whether update was successful")
     message: str = Field(..., description="Status message")
     voice: Optional[VoiceResponse] = Field(None, description="Updated voice details")
+
+
+class AdSegmentItem(BaseModel):
+    """A detected advertisement or sponsor segment."""
+
+    start_seconds: float = Field(..., ge=0, description="Segment start time in seconds")
+    end_seconds: float = Field(..., ge=0, description="Segment end time in seconds")
+    label: str = Field(..., description="Short description of the ad or sponsor read")
+    confidence: float = Field(..., ge=0, le=1, description="Confidence score 0-1")
+
+
+class PodcastAdScanStatusResponse(BaseModel):
+    """Job status for podcast ad scanning."""
+
+    job_id: str = Field(..., description="Scan job identifier")
+    status: str = Field(
+        ...,
+        description="queued | transcribing | analyzing | complete | failed",
+    )
+    progress_pct: int = Field(0, ge=0, le=100, description="Approximate completion percentage")
+    current_stage: Optional[str] = Field(None, description="Human-readable stage message")
+    ad_segments: Optional[List[AdSegmentItem]] = Field(None, description="Detected ads when complete")
+    duration_seconds: Optional[float] = Field(None, description="Total audio duration when known")
+    error: Optional[str] = Field(None, description="Error message when status is failed")
+
+
+class PodcastAdScanSubmitResponse(BaseModel):
+    """Immediate response after submitting an ad scan job."""
+
+    job_id: str
+    status: str
+    progress_pct: int = 0
+
+
+class PodcastAdExportRequest(BaseModel):
+    """Export edited audio after ad scan."""
+
+    job_id: str = Field(..., description="Completed scan job id")
+    export_mode: Literal["clean", "ads_only"] = Field(
+        ...,
+        description="clean removes ads; ads_only keeps only detected ad audio",
+    )
+
+
+class PodcastAdExportResponse(BaseModel):
+    """Result of an export operation."""
+
+    download_url: str = Field(..., description="Relative URL to download the MP3")
+    filename: str = Field(..., description="Safe basename of the exported file")
+    duration_seconds: float = Field(..., description="Duration of the exported audio")
+    file_size_bytes: int = Field(..., description="Exported file size on disk")
+
+
+class SpeakerIsolationClipItem(BaseModel):
+    """A single extracted preview clip for one speaker."""
+
+    clip_id: str = Field(..., description="Stable id, e.g. speaker_1_clip_2")
+    filename: str = Field(..., description="Basename of the mp3 file on disk")
+    start_seconds: float = Field(..., description="Approximate start in source audio (seconds)")
+    end_seconds: float = Field(..., description="Approximate end in source audio (seconds)")
+    duration_seconds: float = Field(..., description="Exported clip duration (seconds, 10–15)")
+    download_url: str = Field(..., description="Relative URL to stream or download the clip")
+
+
+class SpeakerIsolationSpeakerItem(BaseModel):
+    """One diarized speaker with up to three clips."""
+
+    speaker_id: str = Field(..., description="Internal diarization label (e.g. SPEAKER_00)")
+    label: str = Field(..., description='Display label, e.g. "Speaker 1"')
+    total_speaking_seconds: float = Field(..., description="Sum of speech time for this speaker")
+    clips: List[SpeakerIsolationClipItem] = Field(default_factory=list)
+
+
+class SpeakerIsolationStatusResponse(BaseModel):
+    """Job status for speaker isolation / clip extraction."""
+
+    job_id: str
+    status: str = Field(
+        ...,
+        description="queued | diarizing | extracting | complete | failed",
+    )
+    progress_pct: int = Field(0, ge=0, le=100)
+    current_stage: Optional[str] = None
+    speakers: Optional[List[SpeakerIsolationSpeakerItem]] = None
+    duration_seconds: Optional[float] = None
+    error: Optional[str] = None
+
+
+class SpeakerIsolationSubmitResponse(BaseModel):
+    """Immediate response after submitting a speaker isolation job."""
+
+    job_id: str
+    status: str = "queued"
+    progress_pct: int = 0
+
+
+class CreateVoiceFromIsolationClipRequest(BaseModel):
+    """Create a custom voice from one isolation job clip."""
+
+    job_id: str = Field(..., description="Isolation job id")
+    clip_id: str = Field(..., description="Clip id from job results, e.g. speaker_1_clip_2")
+    voice_name: str = Field(..., min_length=1, description="Name for the new voice")
+    voice_description: Optional[str] = Field(None, description="Optional description")

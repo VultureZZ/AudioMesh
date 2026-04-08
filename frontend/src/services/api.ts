@@ -43,6 +43,11 @@ import {
   TranscriptStatusResponse,
   TranscriptItem,
   TranscriptListResponse,
+  PodcastAdScanSubmitResponse,
+  PodcastAdScanStatusResponse,
+  PodcastAdExportResponse,
+  SpeakerIsolationSubmitResponse,
+  SpeakerIsolationStatusResponse,
 } from '../types/api';
 import { AppSettings } from '../types/settings';
 
@@ -678,6 +683,93 @@ class ApiClient {
       params: { format },
       responseType: 'blob',
     });
+    return response.data;
+  }
+
+  async scanPodcastAds(
+    audioFile: File,
+    onUploadProgress?: (percent: number) => void
+  ): Promise<PodcastAdScanSubmitResponse> {
+    const formData = new FormData();
+    formData.append('audio_file', audioFile);
+    const response = await this.client.post<PodcastAdScanSubmitResponse>(
+      '/api/v1/audio-tools/podcast/scan-ads',
+      formData,
+      {
+        onUploadProgress: (evt) => {
+          if (evt.total != null && onUploadProgress) {
+            onUploadProgress(Math.round((evt.loaded * 100) / evt.total));
+          }
+        },
+      }
+    );
+    return response.data;
+  }
+
+  async getPodcastAdScanStatus(jobId: string): Promise<PodcastAdScanStatusResponse> {
+    const response = await this.client.get<PodcastAdScanStatusResponse>(
+      `/api/v1/audio-tools/podcast/scan-ads/${jobId}/status`
+    );
+    return response.data;
+  }
+
+  async exportPodcastAdAudio(jobId: string, exportMode: 'clean' | 'ads_only'): Promise<PodcastAdExportResponse> {
+    const response = await this.client.post<PodcastAdExportResponse>('/api/v1/audio-tools/podcast/export', {
+      job_id: jobId,
+      export_mode: exportMode,
+    });
+    return response.data;
+  }
+
+  async downloadAudioToolsExport(filename: string): Promise<Blob> {
+    const response = await this.client.get(`/api/v1/audio-tools/podcast/download/${encodeURIComponent(filename)}`, {
+      responseType: 'blob',
+    });
+    return response.data;
+  }
+
+  async uploadForSpeakerIsolation(
+    audioFile: File,
+    onUploadProgress?: (percent: number) => void
+  ): Promise<SpeakerIsolationSubmitResponse> {
+    const formData = new FormData();
+    formData.append('audio_file', audioFile);
+    const response = await this.client.post<SpeakerIsolationSubmitResponse>(
+      '/api/v1/audio-tools/isolate-speakers',
+      formData,
+      {
+        onUploadProgress: (evt) => {
+          if (evt.total != null && onUploadProgress) {
+            onUploadProgress(Math.round((evt.loaded * 100) / evt.total));
+          }
+        },
+      }
+    );
+    return response.data;
+  }
+
+  async getSpeakerIsolationStatus(jobId: string): Promise<SpeakerIsolationStatusResponse> {
+    const response = await this.client.get<SpeakerIsolationStatusResponse>(
+      `/api/v1/audio-tools/isolate-speakers/${encodeURIComponent(jobId)}/status`
+    );
+    return response.data;
+  }
+
+  async createVoiceFromIsolationClip(
+    jobId: string,
+    clipId: string,
+    voiceName: string,
+    voiceDescription?: string
+  ): Promise<VoiceCreateResponse> {
+    const response = await this.client.post<VoiceCreateResponse>(
+      '/api/v1/audio-tools/isolate-speakers/create-voice',
+      {
+        job_id: jobId,
+        clip_id: clipId,
+        voice_name: voiceName,
+        voice_description: voiceDescription || null,
+      }
+    );
     return response.data;
   }
 }

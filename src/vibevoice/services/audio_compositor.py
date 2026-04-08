@@ -39,8 +39,24 @@ class AudioCompositor:
         bed_cues = [c for c in cues if c.cue_type == "bed"]
         dialogue_cues = [c for c in cues if c.cue_type == "dialogue"]
 
-        total_len = max(voice_len, self._calculate_timeline_end(voice_len, intro_cues + outro_cues + transition_cues + bed_cues))
-        mix = AudioSegment.silent(duration=total_len)
+        total_len = max(
+            voice_len,
+            self._calculate_timeline_end(voice_len, intro_cues + outro_cues + transition_cues + bed_cues),
+        )
+        mix = (
+            AudioSegment.silent(duration=total_len, frame_rate=voice.frame_rate)
+            .set_channels(voice.channels)
+            .set_sample_width(voice.sample_width)
+        )
+        logger.info(
+            "Compositing production mix: voice_len_ms=%s, total_len_ms=%s, cues=intro:%s,outro:%s,transition:%s,bed:%s",
+            voice_len,
+            total_len,
+            len(intro_cues),
+            len(outro_cues),
+            len(transition_cues),
+            len(bed_cues),
+        )
 
         if bed_cues:
             bed_track = self._build_bed_track(total_len, bed_cues[0], dialogue_cues)
@@ -61,12 +77,12 @@ class AudioCompositor:
             mix = mix.overlay(outro, position=position)
 
         final_mix = mix.overlay(voice, position=0)
-        return self._export_mix(final_mix)
+        return self._export_mix(final_mix, expected_min_duration_ms=voice_len)
 
     def _build_bed_track(self, total_len: int, bed_cue: CuePlacement, dialogue_cues: List[CuePlacement]) -> AudioSegment:
         bed_source = AudioSegment.from_file(bed_cue.file_path).apply_gain(bed_cue.volume_db)
         if len(bed_source) <= 0:
-            return AudioSegment.silent(duration=total_len)
+            return AudioSegment.silent(duration=total_len, frame_rate=44100)
 
         # Target bed level: -6dB in gaps.
         bed = self._loop_to_length(bed_source, total_len).apply_gain(-6.0)
@@ -102,9 +118,9 @@ class AudioCompositor:
                 continue
         return max_end
 
-    def _export_mix(self, mixed_audio: AudioSegment) -> str:
+    def _export_mix(self, mixed_audio: AudioSegment, expected_min_duration_ms: int) -> str:
         config.OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-        stamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+        stamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S_%f")
         wav_path = config.OUTPUT_DIR / f"{stamp}_podcast_production_mix.wav"
         mp3_path = config.OUTPUT_DIR / f"{stamp}_podcast_production_mix.mp3"
 
@@ -121,6 +137,15 @@ class AudioCompositor:
             stderr = exc.stderr.decode("utf-8", errors="ignore") if exc.stderr else str(exc)
             logger.error("ffmpeg conversion failed: %s", stderr)
             raise RuntimeError(f"Failed converting mix to mp3: {stderr}") from exc
+
+        # Guard against accidental truncated exports (e.g. only intro cue length).
+        rendered = AudioSegment.from_file(str(mp3_path))
+        rendered_len = len(rendered)
+        if rendered_len < max(expected_min_duration_ms - 3000, 1000):
+            raise RuntimeError(
+                f"Production mix appears truncated: rendered={rendered_len}ms expected>={expected_min_duration_ms}ms"
+            )
+        logger.info("Exported production mix: mp3=%s, duration_ms=%s", mp3_path, rendered_len)
         return str(mp3_path)
 
 
