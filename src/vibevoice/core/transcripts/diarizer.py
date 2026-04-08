@@ -29,6 +29,28 @@ def _audio_file_to_pyannote_input(audio_path: str) -> dict[str, Any]:
     return {"waveform": waveform, "sample_rate": int(sr)}
 
 
+def as_pyannote_annotation(diarization: Any) -> Any:
+    """
+    Normalize pipeline output to an object with itertracks (pyannote.core.Annotation).
+    pyannote.audio 4.x returns DiarizeOutput; 3.x returns Annotation directly.
+    """
+    if diarization is None:
+        raise ValueError("diarization is None")
+    if hasattr(diarization, "itertracks"):
+        return diarization
+    ann = getattr(diarization, "speaker_diarization", None)
+    if ann is not None and hasattr(ann, "itertracks"):
+        return ann
+    for name in ("diarization", "annotation"):
+        ann = getattr(diarization, name, None)
+        if ann is not None and hasattr(ann, "itertracks"):
+            return ann
+    raise TypeError(
+        f"Unsupported diarization result {type(diarization)!r}: "
+        "expected Annotation or DiarizeOutput with speaker_diarization"
+    )
+
+
 class TranscriptDiarizer:
     """Speaker diarization + assignment helper."""
 
@@ -77,7 +99,8 @@ class TranscriptDiarizer:
     def _run_pipeline_on_file(self, pipeline: Any, audio_path: str) -> Any:
         """Run diarization using preloaded waveform to avoid pyannote file I/O / torchcodec issues."""
         audio_in = _audio_file_to_pyannote_input(audio_path)
-        return pipeline(audio_in)
+        raw = pipeline(audio_in)
+        return as_pyannote_annotation(raw)
 
     async def run(self, audio_path: str):
         pipeline = self._load_pipeline()
@@ -85,6 +108,7 @@ class TranscriptDiarizer:
         return await asyncio.to_thread(self._run_pipeline_on_file, pipeline, audio_path)
 
     async def assign_speakers(self, aligned_transcript: dict[str, Any], diarization: Any) -> list[dict[str, Any]]:
+        diarization = as_pyannote_annotation(diarization)
         whisperx = self._load_whisperx()
         enriched = await asyncio.to_thread(whisperx.assign_word_speakers, diarization, aligned_transcript)
 
