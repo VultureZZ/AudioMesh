@@ -43,10 +43,18 @@ class TranscriptDiarizer:
                 "Set HF_TOKEN and accept pyannote model terms on HuggingFace."
             )
         Pipeline = self._load_pyannote()
-        self._pipeline = Pipeline.from_pretrained(
-            "pyannote/speaker-diarization-3.1",
-            use_auth_token=config.HF_TOKEN,
-        )
+        hf_token = (config.HF_TOKEN or "").strip()
+        # huggingface_hub renamed use_auth_token -> token; newer pyannote rejects the old name.
+        try:
+            self._pipeline = Pipeline.from_pretrained(
+                "pyannote/speaker-diarization-3.1",
+                token=hf_token,
+            )
+        except TypeError:
+            self._pipeline = Pipeline.from_pretrained(
+                "pyannote/speaker-diarization-3.1",
+                use_auth_token=hf_token,
+            )
         return self._pipeline
 
     async def run(self, audio_path: str):

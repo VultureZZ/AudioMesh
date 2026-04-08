@@ -33,6 +33,13 @@ _JOB_ID_RE = re.compile(
 )
 _CLIP_FILE_RE = re.compile(r"^speaker_([1-6])_clip_([123])\.mp3$")
 
+# Same requirement as transcript diarization (pyannote); checked before upload to avoid wasted transfers.
+_HF_TOKEN_MISSING_MSG = (
+    "Speaker isolation requires a Hugging Face token for pyannote diarization. "
+    "Set HF_TOKEN in the API server environment and accept the model agreements for "
+    "pyannote/speaker-diarization-3.1 on huggingface.co."
+)
+
 
 def _ext(name: str) -> str:
     return (Path(name).suffix or "").lower().lstrip(".")
@@ -173,6 +180,11 @@ class SpeakerIsolationService:
         self._jobs: dict[str, dict[str, Any]] = {}
         self._tasks: dict[str, asyncio.Task[None]] = {}
 
+    @staticmethod
+    def _require_hf_token() -> None:
+        if not (config.HF_TOKEN or "").strip():
+            raise ValueError(_HF_TOKEN_MISSING_MSG)
+
     def _job_output_dir(self, job_id: str) -> Path:
         return (config.OUTPUT_DIR / "isolate_speakers" / job_id).resolve()
 
@@ -291,6 +303,20 @@ class SpeakerIsolationService:
             job["status"] = "complete"
             job["progress_pct"] = 100
             job["current_stage"] = "Complete"
+        except RuntimeError as exc:
+            err = str(exc)
+            if "HF_TOKEN" in err:
+                logger.warning("Speaker isolation failed for %s: %s", job_id, err)
+                job["status"] = "failed"
+                job["progress_pct"] = 100
+                job["current_stage"] = "Failed"
+                job["error"] = _HF_TOKEN_MISSING_MSG
+            else:
+                logger.exception("Speaker isolation failed for %s", job_id)
+                job["status"] = "failed"
+                job["progress_pct"] = 100
+                job["current_stage"] = "Failed"
+                job["error"] = err
         except Exception as exc:
             logger.exception("Speaker isolation failed for %s", job_id)
             job["status"] = "failed"
@@ -301,6 +327,7 @@ class SpeakerIsolationService:
             self._tasks.pop(job_id, None)
 
     async def upload_and_queue(self, audio_file: UploadFile) -> dict[str, Any]:
+        self._require_hf_token()
         job_id = str(uuid.uuid4())
         audio_path, _ = await self._save_upload(audio_file, job_id)
         self._jobs[job_id] = {

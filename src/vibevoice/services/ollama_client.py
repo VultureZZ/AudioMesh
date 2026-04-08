@@ -125,36 +125,105 @@ Rules:
             raw = (message.get("content") or "").strip()
             if not raw:
                 raise RuntimeError("Ollama returned empty response for ad detection")
-            parsed = self._parse_ad_segments_json(raw)
-            return self._validate_ad_segment_dicts(parsed, total_duration_seconds)
+            parsed_list = self._parse_ad_segments_json(raw)
+            return self._validate_ad_segment_dicts(parsed_list, total_duration_seconds)
         except httpx.HTTPError as e:
             raise RuntimeError(f"Ollama ad detection request failed: {e}") from e
         except Exception as e:
             raise RuntimeError(f"Ollama ad detection failed: {e}") from e
 
-    def _parse_ad_segments_json(self, raw: str) -> Any:
+    @staticmethod
+    def _strip_markdown_fence(raw: str) -> str:
         cleaned = raw.strip()
-        if cleaned.startswith("```"):
-            lines = cleaned.split("\n")
-            if lines and lines[0].startswith("```"):
-                lines = lines[1:]
-            if lines and lines[-1].strip() == "```":
-                lines = lines[:-1]
-            cleaned = "\n".join(lines).strip()
-        try:
-            return json.loads(cleaned)
-        except json.JSONDecodeError:
-            pass
-        match = re.search(r"\[[\s\S]*\]", cleaned)
-        if match:
+        if not cleaned.startswith("```"):
+            return cleaned
+        lines = cleaned.split("\n")
+        if lines and lines[0].startswith("```"):
+            lines = lines[1:]
+        if lines and lines[-1].strip() == "```":
+            lines = lines[:-1]
+        return "\n".join(lines).strip()
+
+    @staticmethod
+    def _coerce_to_segment_list(parsed: Any) -> Optional[List[Any]]:
+        """Accept either a JSON array or common wrapper objects models return."""
+        if isinstance(parsed, list):
+            return parsed
+        if not isinstance(parsed, dict):
+            return None
+        for key in (
+            "ad_segments",
+            "ads",
+            "segments",
+            "advertisements",
+            "items",
+            "results",
+            "data",
+            "output",
+            "response",
+        ):
+            val = parsed.get(key)
+            if isinstance(val, list):
+                return val
+        for val in parsed.values():
+            if isinstance(val, list):
+                return val
+        return None
+
+    def _json_raw_decode_first(self, cleaned: str, opening: str) -> Any:
+        """Decode first complete JSON value starting at opening bracket ( [ or { )."""
+        dec = json.JSONDecoder()
+        i = cleaned.find(opening)
+        while i >= 0:
             try:
-                return json.loads(match.group(0))
+                val, _end = dec.raw_decode(cleaned[i:])
+                return val
             except json.JSONDecodeError:
-                pass
+                i = cleaned.find(opening, i + 1)
+        raise json.JSONDecodeError("no valid JSON", cleaned, 0)
+
+    def _parse_ad_segments_json(self, raw: str) -> List[Any]:
+        cleaned = self._strip_markdown_fence(raw)
+        if not cleaned:
+            raise ValueError("Empty ad detection response")
+
+        # 1) Whole string parses as JSON
+        for candidate in (cleaned, cleaned.lstrip()):
+            try:
+                parsed = json.loads(candidate)
+                as_list = self._coerce_to_segment_list(parsed)
+                if as_list is not None:
+                    return as_list
+            except json.JSONDecodeError:
+                continue
+
+        # 2) First JSON array or object embedded in extra model commentary
+        dec = json.JSONDecoder()
+        for opener in ("[", "{"):
+            pos = 0
+            while True:
+                i = cleaned.find(opener, pos)
+                if i < 0:
+                    break
+                try:
+                    parsed, _ = dec.raw_decode(cleaned[i:])
+                    as_list = self._coerce_to_segment_list(parsed)
+                    if as_list is not None:
+                        return as_list
+                except json.JSONDecodeError:
+                    pass
+                pos = i + 1
+
+        snippet = cleaned[:800].replace("\n", " ")
+        logger.warning(
+            "Could not parse ad segments JSON (first ~800 chars): %s%s",
+            snippet,
+            "..." if len(cleaned) > 800 else "",
+        )
         raise ValueError("Could not parse JSON array from ad detection response")
 
     def _validate_ad_segment_dicts(
-        self, parsed: Any, total_duration_seconds: float
+        self, parsed: List[Any], total_duration_seconds: float
     ) -> List[Dict[str, Any]]:
         if not isinstance(parsed, list):
             raise ValueError("Ad detection response must be a JSON array")
