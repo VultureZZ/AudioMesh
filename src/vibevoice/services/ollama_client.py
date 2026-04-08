@@ -97,11 +97,12 @@ class OllamaClient:
         system = """You analyze podcast transcripts with timestamps. Identify segments that are advertisements, sponsor reads, promotional breaks, paid integrations, or typical host-read ads (e.g. "brought to you by", discount codes, product pitches).
 
 Rules:
-1. Output ONLY valid JSON: a single array of objects. No markdown, no code fences, no commentary.
-2. Each object must have exactly these keys: "start_seconds" (number), "end_seconds" (number), "label" (short string), "confidence" (number from 0 to 1).
+1. Output ONLY JSON with no text before or after. Use either a top-level array [...] OR a single object {"ad_segments": [...]} containing that array.
+2. Each array element must be an object with keys: "start_seconds" (number), "end_seconds" (number), "label" (short string), "confidence" (number from 0 to 1).
 3. Times must be within [0, total_duration_seconds] and start_seconds < end_seconds.
 4. Merge adjacent ad-related sentences into one segment when they belong to the same break.
-5. If there are no ads, return an empty array []."""
+5. If there are no ads, return [] or {"ad_segments": []}.
+6. Do not use markdown code fences."""
 
         try:
             response = self.client.post(
@@ -169,18 +170,6 @@ Rules:
             if isinstance(val, list):
                 return val
         return None
-
-    def _json_raw_decode_first(self, cleaned: str, opening: str) -> Any:
-        """Decode first complete JSON value starting at opening bracket ( [ or { )."""
-        dec = json.JSONDecoder()
-        i = cleaned.find(opening)
-        while i >= 0:
-            try:
-                val, _end = dec.raw_decode(cleaned[i:])
-                return val
-            except json.JSONDecodeError:
-                i = cleaned.find(opening, i + 1)
-        raise json.JSONDecodeError("no valid JSON", cleaned, 0)
 
     def _parse_ad_segments_json(self, raw: str) -> List[Any]:
         cleaned = self._strip_markdown_fence(raw)

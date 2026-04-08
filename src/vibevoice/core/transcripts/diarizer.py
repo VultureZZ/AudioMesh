@@ -12,6 +12,23 @@ from ...config import config
 logger = logging.getLogger(__name__)
 
 
+def _audio_file_to_pyannote_input(audio_path: str) -> dict[str, Any]:
+    """
+    Build the in-memory input pyannote accepts when file-based decoding is broken
+    (e.g. TorchCodec/AudioDecoder missing — NameError in pyannote.audio.core.io).
+    """
+    import soundfile as sf
+    import torch
+
+    data, sr = sf.read(audio_path, dtype="float32", always_2d=True)
+    # data: (frames, channels) -> waveform: (channel, time)
+    if data.shape[1] == 1:
+        waveform = torch.from_numpy(data[:, 0]).unsqueeze(0)
+    else:
+        waveform = torch.from_numpy(data.T.copy())
+    return {"waveform": waveform, "sample_rate": int(sr)}
+
+
 class TranscriptDiarizer:
     """Speaker diarization + assignment helper."""
 
@@ -57,10 +74,15 @@ class TranscriptDiarizer:
             )
         return self._pipeline
 
+    def _run_pipeline_on_file(self, pipeline: Any, audio_path: str) -> Any:
+        """Run diarization using preloaded waveform to avoid pyannote file I/O / torchcodec issues."""
+        audio_in = _audio_file_to_pyannote_input(audio_path)
+        return pipeline(audio_in)
+
     async def run(self, audio_path: str):
         pipeline = self._load_pipeline()
-        logger.info("Running diarization: %s", audio_path)
-        return await asyncio.to_thread(pipeline, audio_path)
+        logger.info("Running diarization (in-memory waveform): %s", audio_path)
+        return await asyncio.to_thread(self._run_pipeline_on_file, pipeline, audio_path)
 
     async def assign_speakers(self, aligned_transcript: dict[str, Any], diarization: Any) -> list[dict[str, Any]]:
         whisperx = self._load_whisperx()
