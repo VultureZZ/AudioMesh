@@ -26,7 +26,21 @@ warnings.filterwarnings(
 warnings.filterwarnings("ignore", category=UserWarning, module=r"speechbrain\.utils\.torch_audio_backend")
 
 
-def _audio_file_to_pyannote_input(audio_path: str) -> dict[str, Any]:
+def _resolve_diarization_device() -> Any:
+    """Torch device for pyannote Pipeline (GPU when available if DIARIZATION_DEVICE=auto)."""
+    import torch
+
+    raw = (getattr(config, "DIARIZATION_DEVICE", None) or "auto").strip().lower()
+    if raw in ("", "auto"):
+        return torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+    dev = torch.device(raw)
+    if dev.type == "cuda" and not torch.cuda.is_available():
+        logger.warning("DIARIZATION_DEVICE=%s but CUDA is not available; using CPU", raw)
+        return torch.device("cpu")
+    return dev
+
+
+def _audio_file_to_pyannote_input(audio_path: str, device: Any) -> dict[str, Any]:
     """
     Build the in-memory input pyannote accepts when file-based decoding is broken
     (e.g. TorchCodec/AudioDecoder missing — NameError in pyannote.audio.core.io).
@@ -40,6 +54,8 @@ def _audio_file_to_pyannote_input(audio_path: str) -> dict[str, Any]:
         waveform = torch.from_numpy(data[:, 0]).unsqueeze(0)
     else:
         waveform = torch.from_numpy(data.T.copy())
+    if device is not None and getattr(device, "type", "cpu") != "cpu":
+        waveform = waveform.to(device)
     return {"waveform": waveform, "sample_rate": int(sr)}
 
 
@@ -70,6 +86,7 @@ class TranscriptDiarizer:
 
     def __init__(self) -> None:
         self._pipeline: Any = None
+        self._device: Any = None
 
     def _load_pyannote(self):
         try:
@@ -108,17 +125,32 @@ class TranscriptDiarizer:
                 "pyannote/speaker-diarization-3.1",
                 use_auth_token=hf_token,
             )
+        import torch
+
+        self._device = _resolve_diarization_device()
+        try:
+            self._pipeline = self._pipeline.to(self._device)
+        except Exception as exc:
+            logger.warning("Could not move diarization pipeline to %s (%s); using CPU", self._device, exc)
+            self._device = torch.device("cpu")
+            self._pipeline = self._pipeline.to(self._device)
+        logger.info("Pyannote diarization pipeline on device: %s", self._device)
         return self._pipeline
 
     def _run_pipeline_on_file(self, pipeline: Any, audio_path: str) -> Any:
         """Run diarization using preloaded waveform to avoid pyannote file I/O / torchcodec issues."""
-        audio_in = _audio_file_to_pyannote_input(audio_path)
+        device = self._device if self._device is not None else _resolve_diarization_device()
+        audio_in = _audio_file_to_pyannote_input(audio_path, device)
         raw = pipeline(audio_in)
         return as_pyannote_annotation(raw)
 
     async def run(self, audio_path: str):
         pipeline = self._load_pipeline()
-        logger.info("Running diarization (in-memory waveform): %s", audio_path)
+        logger.info(
+            "Running diarization (in-memory waveform, device=%s): %s",
+            self._device,
+            audio_path,
+        )
         return await asyncio.to_thread(self._run_pipeline_on_file, pipeline, audio_path)
 
     async def assign_speakers(self, aligned_transcript: dict[str, Any], diarization: Any) -> list[dict[str, Any]]:
