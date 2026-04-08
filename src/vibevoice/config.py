@@ -153,6 +153,10 @@ class Config:
     # Podcast ad scanner and other audio-tools working files (under outputs/)
     AUDIO_TOOLS_DIR: Path = Path(os.getenv("AUDIO_TOOLS_DIR", "outputs/audio_tools"))
     AUDIO_TOOLS_MAX_UPLOAD_MB: int = int(os.getenv("AUDIO_TOOLS_MAX_UPLOAD_MB", "500"))
+    # After Voice Isolator jobs, unload pyannote + WhisperX from VRAM so other workloads can use the GPU.
+    ISOLATION_UNLOAD_MODELS_AFTER_JOB: bool = os.getenv(
+        "ISOLATION_UNLOAD_MODELS_AFTER_JOB", "true"
+    ).strip().lower() in {"1", "true", "yes", "on"}
     # Ad scan transcription backend:
     # - faster_whisper: uses faster-whisper only (no WhisperX/pyannote/torchcodec import chain).
     # - whisperx: same stack as full transcripts (WhisperX + Pyannote VAD); may log torchcodec warnings.

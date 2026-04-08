@@ -4,11 +4,13 @@ PyAnnote diarization service and transcript speaker assignment.
 from __future__ import annotations
 
 import asyncio
+import gc
 import logging
 import warnings
 from typing import Any
 
 from ...config import config
+from ...gpu_memory import release_torch_cuda_memory
 
 logger = logging.getLogger(__name__)
 
@@ -181,6 +183,29 @@ class TranscriptDiarizer:
                 }
             )
         return segments_out
+
+    def unload_pipeline(self) -> None:
+        """Drop pyannote pipeline references and release GPU memory (best-effort)."""
+        if self._pipeline is None:
+            return
+        try:
+            import torch
+
+            pipe = self._pipeline
+            self._pipeline = None
+            self._device = None
+            if hasattr(pipe, "to"):
+                try:
+                    pipe.to(torch.device("cpu"))
+                except Exception:
+                    logger.debug("Pyannote pipeline move to CPU during unload", exc_info=True)
+            del pipe
+        except Exception:
+            logger.debug("Pyannote pipeline unload", exc_info=True)
+            self._pipeline = None
+            self._device = None
+        gc.collect()
+        release_torch_cuda_memory()
 
 
 transcript_diarizer = TranscriptDiarizer()

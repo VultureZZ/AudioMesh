@@ -4,10 +4,12 @@ WhisperX transcription/alignment service for transcript processing.
 from __future__ import annotations
 
 import asyncio
+import gc
 import logging
 from typing import Any, Optional
 
 from ...config import config
+from ...gpu_memory import release_torch_cuda_memory
 
 logger = logging.getLogger(__name__)
 
@@ -115,6 +117,14 @@ class TranscriptTranscriber:
             except Exception:
                 logger.warning("WhisperX align failed after retries; returning raw transcript.")
                 return transcript
+
+    def unload_models(self) -> None:
+        """Drop WhisperX Whisper and align models; release GPU memory (best-effort)."""
+        self._model = None
+        self._align_model = None
+        self._align_metadata = None
+        gc.collect()
+        release_torch_cuda_memory()
 
 
 transcript_transcriber = TranscriptTranscriber()

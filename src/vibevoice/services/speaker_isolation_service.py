@@ -18,6 +18,8 @@ from pydub import AudioSegment
 
 from ..config import config
 from ..core.transcripts.diarizer import transcript_diarizer
+from ..core.transcripts.transcriber import transcript_transcriber
+from ..gpu_memory import release_torch_cuda_memory
 from .speaker_name_inference import infer_speaker_labels_for_isolation
 
 logger = logging.getLogger(__name__)
@@ -447,6 +449,18 @@ class SpeakerIsolationService:
             job["error"] = str(exc)
         finally:
             self._tasks.pop(job_id, None)
+            if getattr(config, "ISOLATION_UNLOAD_MODELS_AFTER_JOB", True):
+                try:
+
+                    def _unload_isolation_models() -> None:
+                        transcript_diarizer.unload_pipeline()
+                        transcript_transcriber.unload_models()
+                        release_torch_cuda_memory()
+
+                    await asyncio.to_thread(_unload_isolation_models)
+                    logger.info("Voice Isolator: released diarization/transcription models and CUDA cache")
+                except Exception:
+                    logger.debug("Voice Isolator VRAM cleanup failed", exc_info=True)
 
     async def upload_and_queue(self, audio_file: UploadFile) -> dict[str, Any]:
         self._require_hf_token()
