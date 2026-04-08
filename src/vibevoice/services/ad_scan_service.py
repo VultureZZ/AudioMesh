@@ -14,8 +14,8 @@ from fastapi import UploadFile
 from pydub import AudioSegment
 
 from ..config import config
-from ..core.transcripts.transcriber import transcript_transcriber
 from ..models.schemas import AdSegmentItem
+from ..services.ad_scan_transcriber import transcribe_for_ad_scan
 from ..services.ollama_client import ollama_client
 
 logger = logging.getLogger(__name__)
@@ -126,7 +126,19 @@ class AdScanService:
             duration_sec = duration_ms / 1000.0
             job["duration_seconds"] = duration_sec
 
-            transcript = await transcript_transcriber.transcribe(audio_path, language=None)
+            backend = (config.AD_SCAN_TRANSCRIBE_BACKEND or "faster_whisper").strip().lower()
+            logger.info("Ad scan job %s: transcription backend=%s", job_id, backend)
+            if backend in ("whisperx", "whisper_x"):
+                from ..core.transcripts.transcriber import transcript_transcriber
+
+                transcript = await transcript_transcriber.transcribe(audio_path, language=None)
+            elif backend in ("faster_whisper", "faster-whisper", "fasterwhisper"):
+                transcript = await asyncio.to_thread(transcribe_for_ad_scan, audio_path, None)
+            else:
+                raise ValueError(
+                    f"Invalid AD_SCAN_TRANSCRIBE_BACKEND={backend!r}. "
+                    "Use 'faster_whisper' or 'whisperx'."
+                )
             raw_segments = transcript.get("segments") or []
             segments_payload = self._normalize_whisper_segments(raw_segments, duration_sec)
 
