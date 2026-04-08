@@ -12,6 +12,28 @@ from ..config import config
 
 logger = logging.getLogger(__name__)
 
+# JSON Schema for Ollama structured outputs (/api/chat `format`); prevents prose summaries.
+_AD_DETECTION_RESPONSE_SCHEMA: Dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "ad_segments": {
+            "type": "array",
+            "description": "Advertisement, sponsor read, or promo intervals; empty if none detected.",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "start_seconds": {"type": "number"},
+                    "end_seconds": {"type": "number"},
+                    "label": {"type": "string"},
+                    "confidence": {"type": "number"},
+                },
+                "required": ["start_seconds", "end_seconds", "label", "confidence"],
+            },
+        },
+    },
+    "required": ["ad_segments"],
+}
+
 # Omit bulky fields from profile text sent to the script LLM (reference audio transcript, etc.)
 _PROFILE_PROMPT_OMIT_KEYS = frozenset({"transcript"})
 
@@ -92,34 +114,48 @@ class OllamaClient:
             "total_duration_seconds": round(total_duration_seconds, 3),
             "transcript_segments": segments_payload,
         }
-        user_text = json.dumps(payload, ensure_ascii=False)
+        user_text = (
+            "Task: Identify only advertisement, sponsor-read, or promotional time ranges. "
+            "Do not summarize the episode, do not describe topics, and do not write prose. "
+            "Fill the response schema with ad_segments only.\n\n"
+            + json.dumps(payload, ensure_ascii=False)
+        )
 
-        system = """You analyze podcast transcripts with timestamps. Identify segments that are advertisements, sponsor reads, promotional breaks, paid integrations, or typical host-read ads (e.g. "brought to you by", discount codes, product pitches).
+        system = """You mark where ads and sponsor reads occur in a timestamped transcript.
+Respond using the required JSON schema only: object with key "ad_segments" (array).
+Each element: start_seconds, end_seconds, label (short), confidence (0-1).
+Merge adjacent ad lines into one interval. Times must be within [0, total_duration_seconds]. If no ads, use "ad_segments": []."""
 
-Rules:
-1. Output ONLY JSON with no text before or after. Use either a top-level array [...] OR a single object {"ad_segments": [...]} containing that array.
-2. Each array element must be an object with keys: "start_seconds" (number), "end_seconds" (number), "label" (short string), "confidence" (number from 0 to 1).
-3. Times must be within [0, total_duration_seconds] and start_seconds < end_seconds.
-4. Merge adjacent ad-related sentences into one segment when they belong to the same break.
-5. If there are no ads, return [] or {"ad_segments": []}.
-6. Do not use markdown code fences."""
+        request_body: Dict[str, Any] = {
+            "model": model,
+            "messages": [
+                {"role": "system", "content": system},
+                {"role": "user", "content": user_text},
+            ],
+            "stream": False,
+            "format": _AD_DETECTION_RESPONSE_SCHEMA,
+            "options": {
+                "temperature": 0,
+                "top_p": 0.9,
+            },
+        }
 
         try:
             response = self.client.post(
                 f"{self.base_url}/api/chat",
-                json={
-                    "model": model,
-                    "messages": [
-                        {"role": "system", "content": system},
-                        {"role": "user", "content": user_text},
-                    ],
-                    "stream": False,
-                    "options": {
-                        "temperature": 0.2,
-                        "top_p": 0.9,
-                    },
-                },
+                json=request_body,
             )
+            if response.status_code == 400:
+                # Older Ollama without schema support: fall back to JSON mode (object, not prose).
+                logger.warning(
+                    "Ollama rejected structured format; retrying with format=json. Upgrade Ollama for best results."
+                )
+                request_body.pop("format", None)
+                request_body["format"] = "json"
+                response = self.client.post(
+                    f"{self.base_url}/api/chat",
+                    json=request_body,
+                )
             response.raise_for_status()
             result = response.json()
             message = result.get("message") or {}

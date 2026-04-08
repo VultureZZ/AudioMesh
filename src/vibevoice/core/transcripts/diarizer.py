@@ -5,11 +5,25 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import warnings
 from typing import Any
 
 from ...config import config
 
 logger = logging.getLogger(__name__)
+
+# Reduce log noise from optional stack pieces we do not rely on:
+# - torchcodec: pyannote warns on import even when inputs are preloaded waveform dicts (see _audio_file_to_pyannote_input).
+# - pooling std: benign for very short internal segments during diarization.
+# - speechbrain: torchaudio backend deprecation inside their utils.
+warnings.filterwarnings("ignore", category=UserWarning, module=r"pyannote\.audio\.core\.io")
+warnings.filterwarnings(
+    "ignore",
+    message=".*degrees of freedom is <= 0.*",
+    category=UserWarning,
+    module=r"pyannote\.audio\.models\.blocks\.pooling",
+)
+warnings.filterwarnings("ignore", category=UserWarning, module=r"speechbrain\.utils\.torch_audio_backend")
 
 
 def _audio_file_to_pyannote_input(audio_path: str) -> dict[str, Any]:
