@@ -2,13 +2,42 @@
 Podcast generation service that orchestrates article scraping, script generation, and audio creation.
 """
 import logging
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
 from .article_scraper import article_scraper
 from .ollama_client import ollama_client
 from .voice_generator import voice_generator
 
 logger = logging.getLogger(__name__)
+
+
+def _resolve_voice_profile_for_script(
+    voice_name: str,
+    voice_storage: Any,
+    voice_manager: Any,
+) -> Optional[Dict]:
+    """
+    Load stored profile for a voice: by voice id (all types), embedded metadata, then name fallbacks.
+    Keys in the caller's voice_profiles dict must stay as the request's voice_name strings.
+    """
+    voice_data = voice_manager.get_voice_by_name(voice_name)
+    if not voice_data:
+        voice_data = voice_manager.get_voice_by_name(voice_manager.normalize_voice_name(voice_name))
+
+    profile: Optional[Dict] = None
+    if voice_data:
+        voice_id = voice_data.get("id")
+        if voice_id:
+            profile = voice_storage.get_voice_profile(voice_id)
+        embedded = voice_data.get("profile")
+        if not profile and isinstance(embedded, dict) and embedded:
+            profile = dict(embedded)
+
+    if not profile:
+        canonical = voice_manager.normalize_voice_name(voice_name)
+        profile = voice_storage.get_voice_profile(canonical) or voice_storage.get_voice_profile(voice_name)
+
+    return profile
 
 
 class PodcastGenerator:
@@ -68,21 +97,10 @@ class PodcastGenerator:
         from .voice_manager import voice_manager
 
         for voice_name in voices:
-            # Get voice data to find voice_id
-            voice_data = voice_manager.get_voice_by_name(voice_name)
-            if voice_data and voice_data.get("type") == "custom":
-                voice_id = voice_data.get("id")
-                if voice_id:
-                    profile = voice_storage.get_voice_profile(voice_id)
-                    if profile:
-                        voice_profiles[voice_name] = profile
-                        logger.info(f"Loaded profile for voice: {voice_name}")
-            else:
-                # Try direct lookup by name as ID
-                profile = voice_storage.get_voice_profile(voice_name)
-                if profile:
-                    voice_profiles[voice_name] = profile
-                    logger.info(f"Loaded profile for voice: {voice_name}")
+            profile = _resolve_voice_profile_for_script(voice_name, voice_storage, voice_manager)
+            if profile:
+                voice_profiles[voice_name] = profile
+                logger.info(f"Loaded profile for voice: {voice_name}")
 
         # Step 3: Generate script with Ollama
         logger.info("Step 3: Generating script with Ollama...")

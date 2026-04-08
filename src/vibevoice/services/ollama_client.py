@@ -11,6 +11,35 @@ from ..config import config
 
 logger = logging.getLogger(__name__)
 
+# Omit bulky fields from profile text sent to the script LLM (reference audio transcript, etc.)
+_PROFILE_PROMPT_OMIT_KEYS = frozenset({"transcript"})
+
+
+def _sanitize_profile_for_prompt(profile: Dict) -> Dict:
+    """Return a shallow copy of profile suitable for embedding in prompts."""
+    return {k: v for k, v in profile.items() if k not in _PROFILE_PROMPT_OMIT_KEYS}
+
+
+def _join_unique_phrases(phrases: List[str], max_chars: int = 600) -> str:
+    """Join phrase list for the prompt, staying within a character budget."""
+    if not phrases:
+        return ""
+    joined = ", ".join(str(p) for p in phrases if p)
+    if len(joined) <= max_chars:
+        return joined
+    parts: List[str] = []
+    total = 0
+    for p in phrases:
+        if not p:
+            continue
+        sep = ", " if parts else ""
+        chunk = sep + str(p)
+        if total + len(chunk) > max_chars:
+            break
+        parts.append(str(p))
+        total += len(chunk)
+    return ", ".join(parts)
+
 
 class OllamaClient:
     """Client for interacting with Ollama API."""
@@ -173,25 +202,56 @@ class OllamaClient:
 
         # Build voice profiles section if available
         voice_profiles_section = ""
+        voice_adherence_block = ""
         if voice_profiles and voice_names:
-            voice_profiles_section = "\n\n**VOICE PROFILES:**\n"
+            profile_lines: List[str] = []
+            profile_lines.append(
+                "Each speaker's lines must follow their profile for tone, cadence, vocabulary, and sentence structure. "
+                "Podcast **Genre** (below) sets show format and how the topic is framed; these profiles govern how each speaker talks. "
+                "Blend them: honor the genre's role while expressing dialogue in each speaker's voice from their profile.\n"
+            )
+            any_speaker_profile = False
             for i, voice_name in enumerate(voice_names[:num_voices], 1):
-                profile = voice_profiles.get(voice_name)
-                if profile:
-                    voice_profiles_section += f"\nSpeaker {i} ({voice_name}):\n"
-                    if profile.get("cadence"):
-                        voice_profiles_section += f"- Cadence: {profile['cadence']}\n"
-                    if profile.get("tone"):
-                        voice_profiles_section += f"- Tone: {profile['tone']}\n"
-                    if profile.get("vocabulary_style"):
-                        voice_profiles_section += f"- Vocabulary: {profile['vocabulary_style']}\n"
-                    if profile.get("sentence_structure"):
-                        voice_profiles_section += f"- Sentence Structure: {profile['sentence_structure']}\n"
-                    if profile.get("unique_phrases"):
-                        phrases = ", ".join(profile['unique_phrases'][:5])  # Limit to 5 phrases
-                        voice_profiles_section += f"- Unique Phrases: {phrases}\n"
-                    voice_profiles_section += f"\nWhen writing dialogue for Speaker {i}, ensure the script reflects these characteristics. "
-                    voice_profiles_section += "Match the cadence, tone, vocabulary style, and sentence structure described above.\n"
+                raw = voice_profiles.get(voice_name)
+                if not raw:
+                    continue
+                any_speaker_profile = True
+                profile = _sanitize_profile_for_prompt(raw)
+                profile_lines.append(f"\n### Speaker {i} ({voice_name})\n")
+                vdp = profile.get("voice_design_prompt")
+                if isinstance(vdp, str) and vdp.strip():
+                    profile_lines.append(f"- Voice design (target delivery): {vdp.strip()}\n")
+                pt = profile.get("profile_text")
+                if isinstance(pt, str) and pt.strip():
+                    profile_lines.append(f"- Full profile: {pt.strip()}\n")
+                kws = profile.get("keywords")
+                if isinstance(kws, list) and kws:
+                    profile_lines.append(f"- Keywords / context: {', '.join(str(k) for k in kws if k)}\n")
+                if profile.get("cadence"):
+                    profile_lines.append(f"- Cadence: {profile['cadence']}\n")
+                if profile.get("tone"):
+                    profile_lines.append(f"- Tone: {profile['tone']}\n")
+                if profile.get("vocabulary_style"):
+                    profile_lines.append(f"- Vocabulary: {profile['vocabulary_style']}\n")
+                if profile.get("sentence_structure"):
+                    profile_lines.append(f"- Sentence structure: {profile['sentence_structure']}\n")
+                phrases = profile.get("unique_phrases")
+                if isinstance(phrases, list) and phrases:
+                    line = _join_unique_phrases(phrases)
+                    if line:
+                        profile_lines.append(f"- Signature phrases (use sparingly, when natural): {line}\n")
+                profile_lines.append(
+                    f"\nFor **Speaker {i}** only: write dialogue that a TTS voice with this profile would sound natural reading aloud—"
+                    f"match rhythm, word choice, and manner of speaking described above.\n"
+                )
+            if any_speaker_profile:
+                voice_profiles_section = "\n\n**VOICE PROFILES:**\n" + "".join(profile_lines)
+                voice_adherence_block = """
+6. **Voice profile adherence**
+   - Apply the **VOICE PROFILES** section to the matching Speaker number: that speaker's lines must reflect their profile (tone, cadence, structure, vocabulary, and signature phrases when natural).
+   - Genre and podcast specifications set format and framing; speaker profiles set how each person talks. Do not ignore a speaker's profile in favor of generic dialogue.
+
+"""
 
         # Build conditional speaker differentiation section
         speaker_differentiation = ""
@@ -251,8 +311,7 @@ Use exactly this format with no additional markup:
    - Balance information density with breathing room
    - Include moments of agreement/reaction between substantive points
    - Aim for 130-150 words per minute of target duration
-
-**DO NOT:**
+{voice_adherence_block}**DO NOT:**
 - Include stage directions or notes in parentheses or brackets
 - Use placeholders like [Host Name], [Co-host Name], [Name], etc. - write actual dialogue only
 - Use asterisks or other formatting
