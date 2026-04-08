@@ -24,6 +24,7 @@ from ..models.schemas import (
     PodcastScriptResponse,
 )
 from ..config import config
+from ..core.transcripts.transcriber import transcript_transcriber
 from ..gpu_memory import (
     cuda_device_index_from_string,
     release_torch_cuda_memory,
@@ -42,9 +43,11 @@ logger = logging.getLogger(__name__)
 
 def _release_tts_and_wait_for_acestep_vram(music_cues_enabled: bool) -> None:
     """
-    Drop Qwen3-TTS weights after the voice track, then optionally wait until enough VRAM is
-    free for ACE-Step (same host GPU as other CUDA workloads).
+    Free GPU memory used by production steps before ACE-Step: WhisperX (dialogue timing),
+    then Qwen3-TTS, then optionally wait until enough global VRAM is free for the music worker.
     """
+    logger.info("Releasing WhisperX and TTS GPU memory before music cues")
+    transcript_transcriber.unload_models()
     voice_generator.release_gpu_memory_after_speech()
     release_torch_cuda_memory()
     if not music_cues_enabled:
