@@ -2,7 +2,7 @@
  * Article Podcaster page - Convert articles to podcasts
  */
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useApi } from '../hooks/useApi';
 import { useVoices } from '../hooks/useVoices';
 import { useSettings } from '../hooks/useSettings';
@@ -31,12 +31,21 @@ const DURATIONS = [
   { value: '30 min', label: '30 minutes' },
 ];
 
+const PRODUCTION_STYLES = [
+  { value: 'tech_talk', label: 'Tech Talk' },
+  { value: 'casual', label: 'Casual Chat' },
+  { value: 'news', label: 'News' },
+  { value: 'storytelling', label: 'Storytelling' },
+];
+
 export function PodcastPage() {
   const { settings } = useSettings();
   const { voices, loading: voicesLoading } = useVoices();
   const {
     generatePodcastScript,
     generatePodcastAudio,
+    generatePodcastProduction,
+    getPodcastProductionStatus,
     downloadPodcastAudio,
     downloadPodcastById,
     loading,
@@ -49,6 +58,14 @@ export function PodcastPage() {
   const [genre, setGenre] = useState('News');
   const [duration, setDuration] = useState('10 min');
   const [saveToLibrary, setSaveToLibrary] = useState(true);
+  const [productionMode, setProductionMode] = useState(false);
+  const [productionStyle, setProductionStyle] = useState<
+    'tech_talk' | 'casual' | 'news' | 'storytelling'
+  >('casual');
+  const [cueIntro, setCueIntro] = useState(true);
+  const [cueBed, setCueBed] = useState(false);
+  const [cueTransitions, setCueTransitions] = useState(true);
+  const [cueOutro, setCueOutro] = useState(true);
   const [script, setScript] = useState<string | null>(null);
   const [isEditingScript, setIsEditingScript] = useState(false);
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
@@ -57,11 +74,47 @@ export function PodcastPage() {
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [warnings, setWarnings] = useState<string[]>([]);
   const [downloading, setDownloading] = useState(false);
+  const [productionTaskId, setProductionTaskId] = useState<string | null>(null);
+  const [productionTaskStatus, setProductionTaskStatus] = useState<string | null>(null);
+  const [productionStageProgress, setProductionStageProgress] = useState<Record<string, string>>({});
+  const [productionCueStatus, setProductionCueStatus] = useState<Record<string, string>>({});
 
   const speakerOptions = voices.map((voice) => ({
     value: voice.name,
     label: formatVoiceLabel(voice, { showQuality: true }),
   }));
+
+  useEffect(() => {
+    if (!productionTaskId || !productionTaskStatus) return;
+    if (!['queued', 'running'].includes(productionTaskStatus)) return;
+
+    const interval = window.setInterval(async () => {
+      const status = await getPodcastProductionStatus(productionTaskId);
+      if (!status) return;
+      setProductionTaskStatus(status.status);
+      setProductionStageProgress(status.stage_progress || {});
+      setProductionCueStatus(status.cue_status || {});
+      setWarnings(status.warnings || []);
+
+      if (status.status === 'succeeded' && status.audio_url) {
+        const fullUrl = `${settings.apiEndpoint}${status.audio_url}`;
+        setAudioUrl(fullUrl);
+        setPodcastId(status.podcast_id || null);
+        if (status.audio_url.includes('/api/v1/podcast/download/')) {
+          setAudioFilename(status.audio_url.split('/').pop() || null);
+        } else {
+          setAudioFilename(null);
+        }
+        setSuccessMessage(
+          status.podcast_id
+            ? 'Production podcast generated and saved to the library!'
+            : 'Production podcast generated successfully!'
+        );
+      }
+    }, 2500);
+
+    return () => window.clearInterval(interval);
+  }, [productionTaskId, productionTaskStatus, getPodcastProductionStatus, settings.apiEndpoint]);
 
   const handleGenerateScript = async () => {
     if (!url.trim()) {
@@ -123,6 +176,39 @@ export function PodcastPage() {
     setPodcastId(null);
     setSuccessMessage(null);
     setWarnings([]);
+    setProductionTaskId(null);
+    setProductionTaskStatus(null);
+    setProductionStageProgress({});
+    setProductionCueStatus({});
+
+    if (productionMode) {
+      const enabledCues: ('intro' | 'outro' | 'transitions' | 'bed')[] = [];
+      if (cueIntro) enabledCues.push('intro');
+      if (cueBed) enabledCues.push('bed');
+      if (cueTransitions) enabledCues.push('transitions');
+      if (cueOutro) enabledCues.push('outro');
+
+      const submit = await generatePodcastProduction({
+        script: script.trim(),
+        voices: selectedVoices,
+        title: title.trim() || undefined,
+        source_url: url.trim() || undefined,
+        genre,
+        duration,
+        save_to_library: saveToLibrary,
+        production_mode: true,
+        style: productionStyle,
+        enabled_cues: enabledCues,
+        ollama_url: settings.ollamaServerUrl,
+        ollama_model: settings.ollamaModel,
+      });
+      if (submit?.task_id) {
+        setProductionTaskId(submit.task_id);
+        setProductionTaskStatus(submit.status);
+        setSuccessMessage('Production task submitted. Processing...');
+      }
+      return;
+    }
 
     const response = await generatePodcastAudio({
       script: script.trim(),
@@ -138,7 +224,6 @@ export function PodcastPage() {
       const fullUrl = `${settings.apiEndpoint}${response.audio_url}`;
       setAudioUrl(fullUrl);
       setPodcastId(response.podcast_id || null);
-      // Only set a filename when we are using the legacy filename-download endpoint
       if (response.audio_url.includes('/api/v1/podcast/download/')) {
         setAudioFilename(response.audio_url.split('/').pop() || null);
       } else {
@@ -170,7 +255,9 @@ export function PodcastPage() {
       const a = document.createElement('a');
       a.href = url;
       const fileBase = title.trim() || podcastId || audioFilename || 'podcast';
-      a.download = `${fileBase}.wav`;
+      const inferredExt = audioFilename?.split('.').pop();
+      const ext = inferredExt ? `.${inferredExt}` : productionMode ? '.mp3' : '.wav';
+      a.download = `${fileBase}${ext}`;
       document.body.appendChild(a);
       a.click();
       window.URL.revokeObjectURL(url);
@@ -273,7 +360,9 @@ export function PodcastPage() {
         <div className="flex items-center justify-between bg-gray-50 border rounded-lg p-4">
           <div>
             <p className="text-sm font-medium text-gray-900">Save to Podcast Library</p>
-            <p className="text-xs text-gray-500">If enabled, the generated audio will be saved and appear in Podcast Library</p>
+            <p className="text-xs text-gray-500">
+              If enabled, the generated audio will be saved and appear in Podcast Library
+            </p>
           </div>
           <label className="inline-flex items-center cursor-pointer">
             <input
@@ -295,6 +384,69 @@ export function PodcastPage() {
             </div>
           </label>
         </div>
+
+        <div className="flex items-center justify-between bg-gray-50 border rounded-lg p-4">
+          <div>
+            <p className="text-sm font-medium text-gray-900">Production Mode</p>
+            <p className="text-xs text-gray-500">
+              Generate intro/outro/transition/bed music and mix with the voice track
+            </p>
+          </div>
+          <label className="inline-flex items-center cursor-pointer">
+            <input
+              type="checkbox"
+              className="sr-only"
+              checked={productionMode}
+              onChange={(e) => setProductionMode(e.target.checked)}
+            />
+            <div
+              className={`w-11 h-6 rounded-full transition-colors ${
+                productionMode ? 'bg-primary-600' : 'bg-gray-300'
+              }`}
+            >
+              <div
+                className={`w-5 h-5 bg-white rounded-full shadow transform transition-transform translate-y-0.5 ${
+                  productionMode ? 'translate-x-5' : 'translate-x-1'
+                }`}
+              />
+            </div>
+          </label>
+        </div>
+
+        {productionMode && (
+          <div className="bg-gray-50 border rounded-lg p-4 space-y-3">
+            <Select
+              label="Style"
+              options={PRODUCTION_STYLES}
+              value={productionStyle}
+              onChange={(e) =>
+                setProductionStyle(e.target.value as 'tech_talk' | 'casual' | 'news' | 'storytelling')
+              }
+            />
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+              <label className="inline-flex items-center gap-2 text-sm text-gray-700">
+                <input type="checkbox" checked={cueIntro} onChange={(e) => setCueIntro(e.target.checked)} />
+                Intro Music
+              </label>
+              <label className="inline-flex items-center gap-2 text-sm text-gray-700">
+                <input type="checkbox" checked={cueBed} onChange={(e) => setCueBed(e.target.checked)} />
+                Background Bed
+              </label>
+              <label className="inline-flex items-center gap-2 text-sm text-gray-700">
+                <input
+                  type="checkbox"
+                  checked={cueTransitions}
+                  onChange={(e) => setCueTransitions(e.target.checked)}
+                />
+                Transition Stings
+              </label>
+              <label className="inline-flex items-center gap-2 text-sm text-gray-700">
+                <input type="checkbox" checked={cueOutro} onChange={(e) => setCueOutro(e.target.checked)} />
+                Outro Music
+              </label>
+            </div>
+          </div>
+        )}
 
         <div className="flex gap-4">
           <Button
@@ -349,8 +501,37 @@ export function PodcastPage() {
             disabled={!script.trim() || selectedVoices.length === 0}
             className="w-full"
           >
-            Generate Audio
+            {productionMode ? 'Generate Production Audio' : 'Generate Audio'}
           </Button>
+        </div>
+      )}
+
+      {productionTaskId && (
+        <div className="bg-white rounded-lg shadow p-6 space-y-3">
+          <h2 className="text-xl font-semibold text-gray-900">Production Progress</h2>
+          <p className="text-sm text-gray-600">
+            Task <span className="font-mono">{productionTaskId}</span> ({productionTaskStatus || 'queued'})
+          </p>
+          <div className="text-sm text-gray-700 space-y-1">
+            <p>Stage 1: Generating Script — {productionStageProgress.generating_script || 'pending'}</p>
+            <p>
+              Stage 2: Generating Voice Track — {productionStageProgress.generating_voice_track || 'pending'}
+            </p>
+            <p>Stage 3: Generating Music Cues — {productionStageProgress.generating_music_cues || 'pending'}</p>
+            {Object.keys(productionCueStatus).length > 0 && (
+              <div className="pl-2 text-xs text-gray-600 space-y-1">
+                {Object.entries(productionCueStatus).map(([cue, state]) => (
+                  <p key={cue}>
+                    {cue}: {state}
+                  </p>
+                ))}
+              </div>
+            )}
+            <p>
+              Stage 4: Mixing Production Audio — {productionStageProgress.mixing_production_audio || 'pending'}
+            </p>
+            <p>Stage 5: Ready to Download — {productionStageProgress.ready_to_download || 'pending'}</p>
+          </div>
         </div>
       )}
 

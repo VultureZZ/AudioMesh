@@ -14,6 +14,9 @@ import {
   PodcastScriptResponse,
   PodcastGenerateRequest,
   PodcastGenerateResponse,
+  PodcastProductionRequest,
+  PodcastProductionStatusResponse,
+  PodcastProductionSubmitResponse,
   PodcastListResponse,
   MusicCoverGenerateParams,
   MusicGenerateRequest,
@@ -399,6 +402,29 @@ class ApiClient {
     const response = await this.client.post<PodcastGenerateResponse>(
       '/api/v1/podcast/generate',
       request
+    );
+    return response.data;
+  }
+
+  /**
+   * Submit production-mode podcast generation task
+   */
+  async generatePodcastProduction(
+    request: PodcastProductionRequest
+  ): Promise<PodcastProductionSubmitResponse> {
+    const response = await this.client.post<PodcastProductionSubmitResponse>(
+      '/api/v1/podcast/generate-production',
+      request
+    );
+    return response.data;
+  }
+
+  /**
+   * Poll production-mode podcast task status
+   */
+  async getPodcastProductionStatus(taskId: string): Promise<PodcastProductionStatusResponse> {
+    const response = await this.client.get<PodcastProductionStatusResponse>(
+      `/api/v1/podcast/status/${taskId}`
     );
     return response.data;
   }

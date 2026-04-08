@@ -18,6 +18,15 @@ from ..models.schemas import ErrorResponse, PodcastItem, PodcastListResponse
 router = APIRouter(prefix="/api/v1/podcasts", tags=["podcasts"])
 
 
+def _audio_media_type(path: Path) -> str:
+    ext = path.suffix.lower()
+    if ext == ".mp3":
+        return "audio/mpeg"
+    if ext == ".flac":
+        return "audio/flac"
+    return "audio/wav"
+
+
 def _parse_dt(value: Optional[str]) -> Optional[datetime]:
     if not value:
         return None
@@ -134,7 +143,7 @@ async def download_podcast_by_id(podcast_id: str) -> FileResponse:
     if base_dir not in resolved.parents and resolved != base_dir:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Audio file not accessible")
 
-    return FileResponse(path=str(audio_path), media_type="audio/wav", filename=audio_path.name)
+    return FileResponse(path=str(audio_path), media_type=_audio_media_type(audio_path), filename=audio_path.name)
 
 
 @router.delete(

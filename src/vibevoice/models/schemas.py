@@ -142,12 +142,37 @@ class PodcastScriptRequest(BaseModel):
     ollama_model: Optional[str] = Field(None, description="Optional custom Ollama model name")
 
 
+class DialogueSegment(BaseModel):
+    """Dialogue segment metadata for production cue planning."""
+
+    speaker: str = Field(..., description="Speaker label, e.g. Speaker 1")
+    text: str = Field(..., description="Dialogue text for this segment")
+    start_time_hint: float = Field(..., ge=0.0, description="Approximate start time in seconds from voice track start")
+
+
+class PodcastSegment(BaseModel):
+    """Structured script segment for production mode cue placement."""
+
+    segment_type: Literal["intro_music", "dialogue", "transition_sting", "music_bed", "outro_music"] = Field(
+        ...,
+        description="Segment type for music/voice orchestration",
+    )
+    speaker: Optional[str] = Field(None, description="Speaker label for dialogue segments")
+    text: Optional[str] = Field(None, description="Dialogue content for dialogue segments")
+    start_time_hint: Optional[float] = Field(
+        None,
+        ge=0.0,
+        description="Approximate segment start time in seconds from voice track start",
+    )
+
+
 class PodcastScriptResponse(BaseModel):
     """Response model for podcast script generation."""
 
     success: bool = Field(..., description="Whether script generation was successful")
     message: str = Field(..., description="Status message")
     script: Optional[str] = Field(None, description="Generated podcast script with speaker labels")
+    script_segments: List[PodcastSegment] = Field(default_factory=list, description="Structured production cue segments")
     warnings: List[str] = Field(default_factory=list, description="Optional warnings (e.g., background music risk)")
 
 
@@ -172,8 +197,61 @@ class PodcastGenerateResponse(BaseModel):
     audio_url: Optional[str] = Field(None, description="URL to generated audio file")
     file_path: Optional[str] = Field(None, description="Path to generated audio file")
     script: Optional[str] = Field(None, description="Script used for generation")
+    script_segments: List[PodcastSegment] = Field(default_factory=list, description="Structured production cue segments")
     podcast_id: Optional[str] = Field(None, description="Podcast library identifier (if saved)")
     warnings: List[str] = Field(default_factory=list, description="Optional warnings (e.g., background music risk)")
+
+
+class PodcastProductionRequest(BaseModel):
+    """Request model for production-mode podcast generation with music cues."""
+
+    script: str = Field(..., description="Podcast script with speaker labels")
+    voices: List[str] = Field(..., min_length=1, max_length=4, description="List of voice names (1-4 voices)")
+    settings: Optional[SpeechSettings] = Field(default_factory=SpeechSettings, description="Speech generation settings")
+    title: Optional[str] = Field(None, description="Optional title for saving into the podcast library")
+    source_url: Optional[str] = Field(None, description="Optional source URL (e.g., article URL)")
+    genre: Optional[str] = Field(None, description="Optional genre metadata")
+    duration: Optional[str] = Field(None, description="Optional duration metadata (e.g., '10 min')")
+    save_to_library: bool = Field(default=True, description="Whether to save the generated podcast to the library")
+    production_mode: bool = Field(default=True, description="Whether production mode is enabled")
+    style: Literal["tech_talk", "casual", "news", "storytelling"] = Field(
+        default="casual",
+        description="Music style profile for cue prompts",
+    )
+    enabled_cues: List[Literal["intro", "outro", "transitions", "bed"]] = Field(
+        default_factory=lambda: ["intro", "outro", "transitions"],
+        description="Enabled cue groups for production mixing",
+    )
+    ollama_url: Optional[str] = Field(None, description="Optional custom Ollama server URL")
+    ollama_model: Optional[str] = Field(None, description="Optional custom Ollama model name")
+
+
+class PodcastProductionSubmitResponse(BaseModel):
+    """Response model for accepted production-mode generation tasks."""
+
+    success: bool = Field(..., description="Whether request was accepted")
+    message: str = Field(..., description="Status message")
+    task_id: str = Field(..., description="Podcast production task identifier")
+    status: str = Field(..., description="Initial task status")
+
+
+class PodcastProductionStatusResponse(BaseModel):
+    """Response model for production-mode task status polling."""
+
+    success: bool = Field(..., description="Whether status query succeeded")
+    message: str = Field(..., description="Status message")
+    task_id: str = Field(..., description="Podcast production task identifier")
+    status: str = Field(..., description="Task status: queued/running/succeeded/failed")
+    current_stage: Optional[str] = Field(None, description="Current processing stage")
+    progress_pct: int = Field(default=0, ge=0, le=100, description="Task progress percentage")
+    stage_progress: Dict[str, str] = Field(default_factory=dict, description="Stage status map")
+    cue_status: Dict[str, str] = Field(default_factory=dict, description="Per-cue generation status map")
+    audio_url: Optional[str] = Field(None, description="Final mixed audio URL when complete")
+    file_path: Optional[str] = Field(None, description="Final mixed audio path when complete")
+    podcast_id: Optional[str] = Field(None, description="Podcast library identifier (if saved)")
+    script_segments: List[PodcastSegment] = Field(default_factory=list, description="Structured production cue segments")
+    warnings: List[str] = Field(default_factory=list, description="Non-fatal warnings encountered during production")
+    error: Optional[str] = Field(default=None, description="Failure reason when task fails")
 
 
 class PodcastItem(BaseModel):

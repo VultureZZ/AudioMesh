@@ -2,6 +2,7 @@
 Podcast generation service that orchestrates article scraping, script generation, and audio creation.
 """
 import logging
+import re
 from typing import Any, Dict, List, Optional
 
 from .article_scraper import article_scraper
@@ -170,6 +171,29 @@ class PodcastGenerator:
         logger.info(f"Audio generated: {output_path}")
         return str(output_path)
 
+    def generate_script_segments(
+        self,
+        script: str,
+        ollama_url: Optional[str] = None,
+        ollama_model: Optional[str] = None,
+    ) -> List[Dict]:
+        """
+        Build production cue segment structure with Ollama and fallback parsing.
+        """
+        if not script or not script.strip():
+            return []
+
+        try:
+            if ollama_url or ollama_model:
+                from .ollama_client import OllamaClient
+
+                custom_client = OllamaClient(base_url=ollama_url, model=ollama_model)
+                return custom_client.generate_script_segments(script)
+            return self.ollama.generate_script_segments(script)
+        except Exception as exc:
+            logger.warning("Falling back to deterministic script segmentation: %s", exc)
+            return self._fallback_segments_from_script(script)
+
     def _format_script_for_voices(self, script: str, voices: List[str]) -> str:
         """
         Format script to ensure proper speaker-to-voice mapping.
@@ -212,6 +236,42 @@ class PodcastGenerator:
                 formatted_lines.append(f"Speaker 1: {line}")
 
         return "\n".join(formatted_lines)
+
+    def _fallback_segments_from_script(self, script: str) -> List[Dict]:
+        """
+        Fallback segmentation from speaker lines when Ollama JSON segmentation fails.
+        """
+        segments: List[Dict] = [{"segment_type": "intro_music", "start_time_hint": 0.0}]
+        current_time = 2.0
+        speaker_pattern = re.compile(r"^(Speaker\s+\d+):\s*(.+)$", re.IGNORECASE)
+
+        for raw_line in script.split("\n"):
+            line = raw_line.strip()
+            if not line:
+                continue
+            match = speaker_pattern.match(line)
+            if not match:
+                continue
+            speaker = match.group(1).strip()
+            text = match.group(2).strip()
+            if not text:
+                continue
+            segments.append(
+                {
+                    "segment_type": "dialogue",
+                    "speaker": speaker,
+                    "text": text,
+                    "start_time_hint": round(current_time, 2),
+                }
+            )
+            word_count = max(len(text.split()), 1)
+            current_time += max((word_count / 2.6), 1.0)
+
+        if len(segments) > 3:
+            midpoint = round(current_time / 2.0, 2)
+            segments.insert(2, {"segment_type": "transition_sting", "start_time_hint": midpoint})
+        segments.append({"segment_type": "outro_music", "start_time_hint": round(max(current_time - 2.0, 0.0), 2)})
+        return segments
 
 
 # Global podcast generator instance

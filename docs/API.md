@@ -237,17 +237,43 @@ Voice profiles are style metadata (cadence/tone/etc.) used by Ollama-assisted fe
 
 - `POST /api/v1/podcast/generate-script`
   - Body (JSON): `{ url, voices: string[], genre, duration, ollama_url?, ollama_model? }`
-  - Returns: `{ success, message, script? }`
+  - Returns: `{ success, message, script?, script_segments?, warnings? }`
 
 - `POST /api/v1/podcast/generate`
   - Body (JSON): `{ script, voices: string[], settings?, title?, source_url?, genre?, duration?, save_to_library? }`
   - Notes:
     - When `TTS_BACKEND=qwen3`, `settings.language` is applied; when `vibevoice`, VibeVoice defaults are used.
     - If `save_to_library` is true (default), response `audio_url` will be a library download URL.
-  - Returns: `{ success, message, audio_url?, file_path?, script?, podcast_id? }`
+  - Returns: `{ success, message, audio_url?, file_path?, script?, script_segments?, podcast_id?, warnings? }`
+
+- `POST /api/v1/podcast/generate-production`
+  - Body (JSON): `{ script, voices: string[], settings?, title?, source_url?, genre?, duration?, save_to_library?, production_mode?, style?, enabled_cues?, ollama_url?, ollama_model? }`
+  - Defaults:
+    - `production_mode=true`
+    - `style="casual"` (`tech_talk|casual|news|storytelling`)
+    - `enabled_cues=["intro","outro","transitions"]` (`intro|outro|transitions|bed`)
+  - Returns immediately with async task metadata:
+    - `{ success, message, task_id, status }`
+  - Notes:
+    - Uses existing voice generation pipeline for narration.
+    - Uses ACE-Step for cue generation when configured.
+    - If ACE-Step is unavailable, task gracefully degrades to voice-only output and reports warnings.
+
+- `GET /api/v1/podcast/status/{task_id}`
+  - Returns production task status:
+    - `{ success, message, task_id, status, current_stage, progress_pct, stage_progress, cue_status, audio_url?, file_path?, podcast_id?, script_segments?, warnings?, error? }`
+  - Status values: `queued | running | succeeded | failed`
+  - Typical stage keys:
+    - `generating_script`
+    - `generating_voice_track`
+    - `generating_music_cues`
+    - `mixing_production_audio`
+    - `ready_to_download`
+  - Poll every ~2-3 seconds until `succeeded` or `failed`.
 
 - `GET /api/v1/podcast/download/{filename}`
   - Legacy filename-based download for items generated into the `outputs/` folder.
+  - Supports wav/mp3/flac response media types by filename extension.
 
 ### Podcast library
 
@@ -354,4 +380,33 @@ curl -L "http://localhost:8000/api/v1/podcasts/<podcast_id>/download" \
   -H "X-API-Key: ${API_KEY}" \
   --output podcast.wav
 ```
+
+### Generate production podcast (async) and poll status
+
+```bash
+curl -sS -X POST "http://localhost:8000/api/v1/podcast/generate-production" \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: ${API_KEY}" \
+  -d '{
+    "script": "Speaker 1: Welcome back.\nSpeaker 2: Today we cover AI tooling.",
+    "voices": ["Alice", "Frank"],
+    "title": "AI Weekly",
+    "save_to_library": true,
+    "production_mode": true,
+    "style": "tech_talk",
+    "enabled_cues": ["intro", "bed", "transitions", "outro"]
+  }'
+```
+
+```bash
+curl -sS "http://localhost:8000/api/v1/podcast/status/<task_id>" \
+  -H "X-API-Key: ${API_KEY}"
+```
+
+## Runtime dependencies
+
+- Python packages: `pydub`, `ffmpeg-python`
+- System binary required for conversion/mixing:
+  - macOS: `brew install ffmpeg`
+  - Ubuntu/Debian: `apt install ffmpeg`
 

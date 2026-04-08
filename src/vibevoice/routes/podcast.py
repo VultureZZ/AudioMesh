@@ -1,9 +1,13 @@
 """
 Podcast generation endpoints.
 """
+import asyncio
 import logging
 import shutil
+from datetime import datetime
 from pathlib import Path
+from threading import Lock
+from typing import Dict, List
 from uuid import uuid4
 
 from fastapi import APIRouter, HTTPException, Request, status
@@ -13,17 +17,300 @@ from ..models.schemas import (
     ErrorResponse,
     PodcastGenerateRequest,
     PodcastGenerateResponse,
+    PodcastProductionRequest,
+    PodcastProductionStatusResponse,
+    PodcastProductionSubmitResponse,
     PodcastScriptRequest,
     PodcastScriptResponse,
 )
 from ..config import config
 from ..models.podcast_storage import podcast_storage
+from ..services.audio_compositor import CuePlacement, audio_compositor
 from ..services.podcast_generator import podcast_generator
+from ..services.podcast_music_service import podcast_music_service
+from ..services.podcast_timing_service import podcast_timing_service
 from ..services.voice_manager import voice_manager
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v1/podcast", tags=["podcast"])
+
+_PRODUCTION_TASKS: Dict[str, Dict] = {}
+_PRODUCTION_TASKS_LOCK = Lock()
+
+
+def _audio_media_type(path: Path) -> str:
+    ext = path.suffix.lower()
+    if ext == ".mp3":
+        return "audio/mpeg"
+    if ext == ".flac":
+        return "audio/flac"
+    return "audio/wav"
+
+
+def _set_production_task(task_id: str, **updates) -> None:
+    with _PRODUCTION_TASKS_LOCK:
+        if task_id not in _PRODUCTION_TASKS:
+            _PRODUCTION_TASKS[task_id] = {}
+        _PRODUCTION_TASKS[task_id].update(updates)
+
+
+def _get_production_task(task_id: str) -> Dict | None:
+    with _PRODUCTION_TASKS_LOCK:
+        data = _PRODUCTION_TASKS.get(task_id)
+        return dict(data) if data else None
+
+
+def _initial_stage_progress() -> Dict[str, str]:
+    return {
+        "generating_script": "pending",
+        "generating_voice_track": "pending",
+        "generating_music_cues": "pending",
+        "mixing_production_audio": "pending",
+        "ready_to_download": "pending",
+    }
+
+
+def _merge_dialogue_timing(segments: List[Dict], dialogue_timing: List[Dict]) -> List[Dict]:
+    if not segments:
+        return []
+    out: List[Dict] = []
+    dialogue_index = 0
+    for segment in segments:
+        if segment.get("segment_type") == "dialogue":
+            if dialogue_index < len(dialogue_timing):
+                timing = dialogue_timing[dialogue_index]
+                merged = dict(segment)
+                merged["start_time_hint"] = timing.get("start_time_hint", segment.get("start_time_hint", 0.0))
+                merged["duration_ms"] = timing.get("duration_ms")
+                merged["speaker"] = timing.get("speaker", segment.get("speaker"))
+                merged["text"] = timing.get("text", segment.get("text"))
+                out.append(merged)
+            else:
+                out.append(dict(segment))
+            dialogue_index += 1
+        else:
+            out.append(dict(segment))
+    return out
+
+
+def _save_podcast_to_library(
+    *,
+    audio_source_path: Path,
+    script_text: str,
+    title: str | None,
+    voices: List[str],
+    source_url: str | None,
+    genre: str | None,
+    duration: str | None,
+) -> tuple[str, Path]:
+    podcast_id = str(uuid4())
+    resolved_title = (title or "").strip() or f"Podcast {podcast_id[:8]}"
+    config.PODCASTS_DIR.mkdir(parents=True, exist_ok=True)
+    target_audio_path = config.PODCASTS_DIR / f"{podcast_id}{audio_source_path.suffix.lower() or '.wav'}"
+    shutil.copy2(audio_source_path, target_audio_path)
+
+    script_path = config.PODCASTS_DIR / f"{podcast_id}.txt"
+    script_path.write_text(script_text)
+
+    podcast_storage.add_podcast(
+        podcast_id=podcast_id,
+        title=resolved_title,
+        voices=voices,
+        audio_path=target_audio_path,
+        script_path=script_path,
+        source_url=source_url,
+        genre=genre,
+        duration=duration,
+        extra={
+            "file_size_bytes": target_audio_path.stat().st_size,
+        },
+    )
+    return podcast_id, target_audio_path
+
+
+async def _run_production_task(task_id: str, request: PodcastProductionRequest) -> None:
+    stage_progress = _initial_stage_progress()
+    cue_status: Dict[str, str] = {}
+    warnings: List[str] = []
+
+    try:
+        stage_progress["generating_script"] = "running"
+        _set_production_task(
+            task_id,
+            status="running",
+            current_stage="Generating Script",
+            progress_pct=8,
+            stage_progress=stage_progress,
+            warnings=warnings,
+        )
+
+        script_segments = await asyncio.to_thread(
+            podcast_generator.generate_script_segments,
+            request.script,
+            request.ollama_url,
+            request.ollama_model,
+        )
+        stage_progress["generating_script"] = "completed"
+        _set_production_task(
+            task_id,
+            script_segments=script_segments,
+            current_stage="Generating Voice Track",
+            progress_pct=25,
+            stage_progress=stage_progress,
+        )
+
+        stage_progress["generating_voice_track"] = "running"
+        voice_path = await asyncio.to_thread(
+            podcast_generator.generate_audio,
+            request.script,
+            request.voices,
+        )
+        stage_progress["generating_voice_track"] = "completed"
+
+        dialogue_timing = await podcast_timing_service.build_dialogue_timing(request.script, voice_path)
+        script_segments = _merge_dialogue_timing(script_segments, dialogue_timing)
+        _set_production_task(
+            task_id,
+            script_segments=script_segments,
+            current_stage="Generating Music Cues",
+            progress_pct=45,
+            stage_progress=stage_progress,
+        )
+
+        enabled = set(request.enabled_cues or [])
+        stage_progress["generating_music_cues"] = "running"
+
+        cue_paths: Dict[str, str] = {}
+        health = await asyncio.to_thread(podcast_music_service.health_check)
+        music_available = bool(health.get("available"))
+        if not music_available:
+            warnings.append("ACE-Step not configured. Continuing with voice-only output.")
+            stage_progress["generating_music_cues"] = "skipped"
+            _set_production_task(task_id, stage_progress=stage_progress, warnings=warnings)
+        else:
+            async def _generate_named_cue(cue_name: str) -> None:
+                cue_status[cue_name] = "running"
+                _set_production_task(task_id, cue_status=cue_status, stage_progress=stage_progress)
+                try:
+                    cue_paths[cue_name] = await asyncio.to_thread(
+                        podcast_music_service.generate_cue,
+                        cue_name,
+                        request.style,
+                    )
+                    cue_status[cue_name] = "succeeded"
+                except Exception as exc:
+                    cue_status[cue_name] = "failed"
+                    warnings.append(f"Failed generating {cue_name} cue: {exc}")
+                _set_production_task(task_id, cue_status=cue_status, warnings=warnings)
+
+            cue_jobs: List[asyncio.Task] = []
+            if "intro" in enabled:
+                cue_jobs.append(asyncio.create_task(_generate_named_cue("intro")))
+            if "outro" in enabled:
+                cue_jobs.append(asyncio.create_task(_generate_named_cue("outro")))
+            if "transitions" in enabled:
+                cue_jobs.append(asyncio.create_task(_generate_named_cue("transition")))
+            if "bed" in enabled:
+                cue_jobs.append(asyncio.create_task(_generate_named_cue("bed")))
+            if cue_jobs:
+                await asyncio.gather(*cue_jobs)
+                stage_progress["generating_music_cues"] = "completed"
+            else:
+                stage_progress["generating_music_cues"] = "skipped"
+
+        _set_production_task(
+            task_id,
+            current_stage="Mixing Production Audio",
+            progress_pct=75,
+            stage_progress=stage_progress,
+            cue_status=cue_status,
+        )
+
+        stage_progress["mixing_production_audio"] = "running"
+        cue_placements: List[CuePlacement] = []
+        for segment in script_segments:
+            if segment.get("segment_type") == "dialogue":
+                cue_placements.append(
+                    CuePlacement(
+                        cue_type="dialogue",
+                        file_path=voice_path,
+                        position_ms=int(float(segment.get("start_time_hint", 0.0)) * 1000),
+                        duration_ms=int(segment.get("duration_ms") or 0),
+                    )
+                )
+
+        if "intro" in cue_paths:
+            cue_placements.append(CuePlacement(cue_type="intro", file_path=cue_paths["intro"], position_ms=0, volume_db=-1.5))
+        if "bed" in cue_paths:
+            cue_placements.append(CuePlacement(cue_type="bed", file_path=cue_paths["bed"], position_ms=0, volume_db=0.0))
+        if "outro" in cue_paths:
+            cue_placements.append(CuePlacement(cue_type="outro", file_path=cue_paths["outro"], position_ms=0, volume_db=-2.0))
+        if "transition" in cue_paths:
+            for segment in script_segments:
+                if segment.get("segment_type") == "transition_sting":
+                    cue_placements.append(
+                        CuePlacement(
+                            cue_type="transition",
+                            file_path=cue_paths["transition"],
+                            position_ms=int(float(segment.get("start_time_hint", 0.0)) * 1000),
+                            volume_db=-1.0,
+                        )
+                    )
+
+        final_path = voice_path
+        if cue_paths:
+            try:
+                final_path = await asyncio.to_thread(audio_compositor.mix_podcast, voice_path, cue_placements)
+            except Exception as exc:
+                warnings.append(f"Audio mixing failed; returning voice-only output: {exc}")
+
+        stage_progress["mixing_production_audio"] = "completed"
+        stage_progress["ready_to_download"] = "completed"
+
+        output_file = Path(final_path)
+        podcast_id = None
+        audio_url = f"/api/v1/podcast/download/{output_file.name}"
+        saved_path = output_file
+        if request.save_to_library:
+            podcast_id, saved_path = _save_podcast_to_library(
+                audio_source_path=output_file,
+                script_text=request.script,
+                title=request.title,
+                voices=request.voices,
+                source_url=request.source_url,
+                genre=request.genre,
+                duration=request.duration,
+            )
+            audio_url = f"/api/v1/podcasts/{podcast_id}/download"
+
+        _set_production_task(
+            task_id,
+            success=True,
+            message="Production podcast generated successfully",
+            status="succeeded",
+            current_stage="Ready to Download",
+            progress_pct=100,
+            stage_progress=stage_progress,
+            cue_status=cue_status,
+            audio_url=audio_url,
+            file_path=str(saved_path),
+            podcast_id=podcast_id,
+            warnings=warnings,
+        )
+    except Exception as exc:
+        stage_progress["ready_to_download"] = "failed"
+        _set_production_task(
+            task_id,
+            status="failed",
+            message="Production podcast generation failed",
+            current_stage="Failed",
+            progress_pct=100,
+            stage_progress=stage_progress,
+            cue_status=cue_status,
+            warnings=warnings,
+            error=str(exc),
+        )
 
 
 @router.post(
@@ -77,6 +364,11 @@ async def generate_podcast_script(
             ollama_url=request.ollama_url,
             ollama_model=request.ollama_model,
         )
+        script_segments = podcast_generator.generate_script_segments(
+            script,
+            ollama_url=request.ollama_url,
+            ollama_model=request.ollama_model,
+        )
 
         logger.info("")
         logger.info("Script Generation Completed Successfully")
@@ -87,6 +379,7 @@ async def generate_podcast_script(
             success=True,
             message="Podcast script generated successfully",
             script=script,
+            script_segments=script_segments,
             warnings=warnings,
         )
 
@@ -153,6 +446,7 @@ async def generate_podcast_audio(
             script=request.script,
             voices=request.voices,
         )
+        script_segments = podcast_generator.generate_script_segments(request.script)
 
         output_file = Path(output_path)
         logger.info("")
@@ -166,37 +460,16 @@ async def generate_podcast_audio(
         saved_path = output_file
 
         if request.save_to_library:
-            podcast_id = str(uuid4())
-            # Derive title if missing
-            title = (request.title or "").strip()
-            if not title:
-                title = f"Podcast {podcast_id[:8]}"
-
-            # Save audio into podcasts dir (so delete is safe and contained)
-            config.PODCASTS_DIR.mkdir(parents=True, exist_ok=True)
-            saved_audio_path = config.PODCASTS_DIR / f"{podcast_id}.wav"
-            shutil.copy2(output_file, saved_audio_path)
-
-            # Save script to file
-            saved_script_path = config.PODCASTS_DIR / f"{podcast_id}.txt"
-            saved_script_path.write_text(request.script)
-
-            podcast_storage.add_podcast(
-                podcast_id=podcast_id,
-                title=title,
+            podcast_id, saved_path = _save_podcast_to_library(
+                audio_source_path=output_file,
+                script_text=request.script,
+                title=request.title,
                 voices=request.voices,
-                audio_path=saved_audio_path,
-                script_path=saved_script_path,
                 source_url=request.source_url,
                 genre=request.genre,
                 duration=request.duration,
-                extra={
-                    "file_size_bytes": saved_audio_path.stat().st_size,
-                },
             )
-
             audio_url = f"/api/v1/podcasts/{podcast_id}/download"
-            saved_path = saved_audio_path
 
         return PodcastGenerateResponse(
             success=True,
@@ -204,6 +477,7 @@ async def generate_podcast_audio(
             audio_url=audio_url,
             file_path=str(saved_path),
             script=request.script,
+            script_segments=script_segments,
             podcast_id=podcast_id,
             warnings=warnings,
         )
@@ -228,6 +502,85 @@ async def generate_podcast_audio(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Unexpected error: {str(e)}",
         ) from e
+
+
+@router.post(
+    "/generate-production",
+    response_model=PodcastProductionSubmitResponse,
+    responses={
+        400: {"model": ErrorResponse},
+        500: {"model": ErrorResponse},
+    },
+)
+async def generate_podcast_production(
+    request: PodcastProductionRequest, http_request: Request
+) -> PodcastProductionSubmitResponse:
+    """
+    Submit async production-mode podcast generation task.
+    """
+    client_ip = http_request.client.host if http_request.client else "unknown"
+    logger.info("Production podcast task requested from %s", client_ip)
+
+    if not request.script or not request.script.strip():
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Script cannot be empty")
+    if not request.voices:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="At least one voice is required")
+    if len(request.voices) > 4:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Maximum 4 voices allowed")
+
+    task_id = str(uuid4())
+    _set_production_task(
+        task_id,
+        success=True,
+        message="Production podcast task accepted",
+        task_id=task_id,
+        status="queued",
+        current_stage="Queued",
+        progress_pct=0,
+        stage_progress=_initial_stage_progress(),
+        cue_status={},
+        audio_url=None,
+        file_path=None,
+        podcast_id=None,
+        script_segments=[],
+        warnings=[],
+        error=None,
+        created_at=datetime.utcnow().isoformat(),
+    )
+    asyncio.create_task(_run_production_task(task_id, request))
+    return PodcastProductionSubmitResponse(
+        success=True,
+        message="Production podcast task accepted",
+        task_id=task_id,
+        status="queued",
+    )
+
+
+@router.get(
+    "/status/{task_id}",
+    response_model=PodcastProductionStatusResponse,
+    responses={404: {"model": ErrorResponse}},
+)
+async def get_podcast_production_status(task_id: str) -> PodcastProductionStatusResponse:
+    task = _get_production_task(task_id)
+    if not task:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Podcast production task not found")
+    return PodcastProductionStatusResponse(
+        success=bool(task.get("success", True)),
+        message=task.get("message", "Task status"),
+        task_id=task_id,
+        status=task.get("status", "queued"),
+        current_stage=task.get("current_stage"),
+        progress_pct=int(task.get("progress_pct", 0)),
+        stage_progress=task.get("stage_progress") or {},
+        cue_status=task.get("cue_status") or {},
+        audio_url=task.get("audio_url"),
+        file_path=task.get("file_path"),
+        podcast_id=task.get("podcast_id"),
+        script_segments=task.get("script_segments") or [],
+        warnings=task.get("warnings") or [],
+        error=task.get("error"),
+    )
 
 
 @router.get(
@@ -258,6 +611,6 @@ async def download_podcast(filename: str) -> FileResponse:
 
     return FileResponse(
         path=str(file_path),
-        media_type="audio/wav",
+        media_type=_audio_media_type(file_path),
         filename=filename,
     )

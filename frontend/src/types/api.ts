@@ -105,6 +105,7 @@ export interface PodcastScriptResponse {
   success: boolean;
   message: string;
   script?: string;
+  script_segments?: PodcastSegment[];
   warnings?: string[];
 }
 
@@ -125,8 +126,62 @@ export interface PodcastGenerateResponse {
   audio_url?: string;
   file_path?: string;
   script?: string;
+  script_segments?: PodcastSegment[];
   podcast_id?: string;
   warnings?: string[];
+}
+
+export type PodcastSegmentType =
+  | 'intro_music'
+  | 'dialogue'
+  | 'transition_sting'
+  | 'music_bed'
+  | 'outro_music';
+
+export interface PodcastDialogueSegment {
+  speaker: string;
+  text: string;
+  start_time_hint: number;
+}
+
+export interface PodcastSegment {
+  segment_type: PodcastSegmentType;
+  speaker?: string;
+  text?: string;
+  start_time_hint?: number;
+  duration_ms?: number;
+}
+
+export interface PodcastProductionRequest extends PodcastGenerateRequest {
+  production_mode?: boolean;
+  style?: 'tech_talk' | 'casual' | 'news' | 'storytelling';
+  enabled_cues?: ('intro' | 'outro' | 'transitions' | 'bed')[];
+  ollama_url?: string;
+  ollama_model?: string;
+}
+
+export interface PodcastProductionSubmitResponse {
+  success: boolean;
+  message: string;
+  task_id: string;
+  status: 'queued' | 'running' | 'succeeded' | 'failed' | string;
+}
+
+export interface PodcastProductionStatusResponse {
+  success: boolean;
+  message: string;
+  task_id: string;
+  status: 'queued' | 'running' | 'succeeded' | 'failed' | string;
+  current_stage?: string;
+  progress_pct: number;
+  stage_progress: Record<string, string>;
+  cue_status: Record<string, string>;
+  audio_url?: string;
+  file_path?: string;
+  podcast_id?: string;
+  script_segments?: PodcastSegment[];
+  warnings?: string[];
+  error?: string;
 }
 
 export interface PodcastItem {

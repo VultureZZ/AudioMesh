@@ -2,8 +2,9 @@
 Ollama client service for LLM script generation.
 """
 import logging
+import json
 import re
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 import httpx
 
@@ -150,6 +151,123 @@ class OllamaClient:
             error_msg = f"Unexpected error during script generation: {str(e)}"
             logger.error(error_msg)
             raise RuntimeError(error_msg) from e
+
+    def generate_script_segments(
+        self,
+        script: str,
+        custom_model: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        """
+        Generate structured production cue segments from a podcast script.
+
+        Args:
+            script: Speaker-labeled script text
+            custom_model: Optional model override
+
+        Returns:
+            List of segment dictionaries
+        """
+        model = custom_model or self.model
+        prompt = self._build_segmentation_prompt(script)
+        try:
+            response = self.client.post(
+                f"{self.base_url}/api/generate",
+                json={
+                    "model": model,
+                    "prompt": prompt,
+                    "stream": False,
+                    "options": {
+                        "temperature": 0.2,
+                        "top_p": 0.9,
+                    },
+                },
+            )
+            response.raise_for_status()
+            result = response.json()
+            raw = (result.get("response") or "").strip()
+            if not raw:
+                raise RuntimeError("Ollama returned empty segmentation response")
+            parsed = self._parse_segment_json(raw)
+            return self._validate_segments(parsed)
+        except httpx.HTTPError as e:
+            error_msg = f"Ollama API request failed for segmentation: {str(e)}"
+            logger.error(error_msg)
+            raise RuntimeError(error_msg) from e
+        except Exception as e:
+            error_msg = f"Unexpected error during segmentation generation: {str(e)}"
+            logger.error(error_msg)
+            raise RuntimeError(error_msg) from e
+
+    def _build_segmentation_prompt(self, script: str) -> str:
+        return f"""You are a production assistant for podcast post-processing.
+
+Convert the script into a strict JSON array of segments with cue injection points.
+
+Allowed segment_type values:
+- intro_music
+- dialogue
+- transition_sting
+- music_bed
+- outro_music
+
+Rules:
+1. Output ONLY JSON, no markdown fences or commentary.
+2. For dialogue segments, include:
+   - speaker (e.g., "Speaker 1")
+   - text
+   - start_time_hint (number, seconds from 0; monotonic non-decreasing)
+3. Non-dialogue segments should still include start_time_hint.
+4. Include intro_music near start (0-2s), outro_music near ending, transition_sting at major topic shifts, and optional music_bed markers.
+5. Keep dialogue text faithful to the script.
+
+SCRIPT:
+{script}
+"""
+
+    def _parse_segment_json(self, raw: str) -> Any:
+        cleaned = raw.strip()
+        if cleaned.startswith("```"):
+            cleaned = re.sub(r"^```(?:json)?", "", cleaned).strip()
+            cleaned = re.sub(r"```$", "", cleaned).strip()
+        return json.loads(cleaned)
+
+    def _validate_segments(self, parsed: Any) -> List[Dict[str, Any]]:
+        allowed_types = {"intro_music", "dialogue", "transition_sting", "music_bed", "outro_music"}
+        if not isinstance(parsed, list):
+            raise RuntimeError("Segment response must be a JSON array")
+
+        normalized: List[Dict[str, Any]] = []
+        last_time = 0.0
+        for item in parsed:
+            if not isinstance(item, dict):
+                continue
+            segment_type = str(item.get("segment_type") or "").strip()
+            if segment_type not in allowed_types:
+                continue
+            start_time_hint_raw = item.get("start_time_hint", 0.0)
+            try:
+                start_time_hint = max(float(start_time_hint_raw), 0.0)
+            except (TypeError, ValueError):
+                start_time_hint = last_time
+            if start_time_hint < last_time:
+                start_time_hint = last_time
+            last_time = start_time_hint
+
+            segment: Dict[str, Any] = {
+                "segment_type": segment_type,
+                "start_time_hint": start_time_hint,
+            }
+            if segment_type == "dialogue":
+                speaker = str(item.get("speaker") or "").strip()
+                text = str(item.get("text") or "").strip()
+                if not speaker or not text:
+                    continue
+                segment["speaker"] = speaker
+                segment["text"] = text
+            normalized.append(segment)
+        if not normalized:
+            raise RuntimeError("No valid segments returned by Ollama")
+        return normalized
 
     def _build_prompt(
         self,

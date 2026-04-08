@@ -14,6 +14,9 @@ import {
   PodcastScriptResponse,
   PodcastGenerateRequest,
   PodcastGenerateResponse,
+  PodcastProductionRequest,
+  PodcastProductionStatusResponse,
+  PodcastProductionSubmitResponse,
   PodcastListResponse,
   MusicCoverGenerateParams,
   MusicGenerateRequest,
@@ -177,6 +180,20 @@ export function useApi() {
   const generatePodcastAudio = useCallback(
     async (request: PodcastGenerateRequest): Promise<PodcastGenerateResponse | null> => {
       return execute(() => apiClient.generatePodcastAudio(request));
+    },
+    [execute]
+  );
+
+  const generatePodcastProduction = useCallback(
+    async (request: PodcastProductionRequest): Promise<PodcastProductionSubmitResponse | null> => {
+      return execute(() => apiClient.generatePodcastProduction(request));
+    },
+    [execute]
+  );
+
+  const getPodcastProductionStatus = useCallback(
+    async (taskId: string): Promise<PodcastProductionStatusResponse | null> => {
+      return execute(() => apiClient.getPodcastProductionStatus(taskId));
     },
     [execute]
   );
@@ -448,6 +465,8 @@ export function useApi() {
     generateVoiceProfile,
     generatePodcastScript,
     generatePodcastAudio,
+    generatePodcastProduction,
+    getPodcastProductionStatus,
     generateMusic,
     generateMusicCover,
     simpleGenerateMusic,
