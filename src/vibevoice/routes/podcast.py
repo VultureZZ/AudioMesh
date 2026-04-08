@@ -533,7 +533,6 @@ async def generate_podcast_production(
         task_id,
         success=True,
         message="Production podcast task accepted",
-        task_id=task_id,
         status="queued",
         current_stage="Queued",
         progress_pct=0,
