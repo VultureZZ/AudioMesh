@@ -12,6 +12,7 @@ import uuid
 from pathlib import Path
 from typing import Any, Optional
 
+import numpy as np
 from fastapi import UploadFile
 from pydub import AudioSegment
 
@@ -161,6 +162,105 @@ def _pick_top_non_overlapping(
     return picked
 
 
+def _mfcc_profile_for_interval(full: AudioSegment, start_s: float, end_s: float) -> np.ndarray:
+    """Short timbre vector from the same 10–15s window we export (librosa MFCC means)."""
+    import librosa
+
+    seg = _normalize_to_clip_window(full, start_s, end_s)
+    seg = seg.set_channels(1).set_frame_rate(16000)
+    samples = np.array(seg.get_array_of_samples(), dtype=np.float32)
+    if samples.size == 0:
+        return np.zeros(13, dtype=np.float32)
+    denom = float(2 ** (8 * seg.sample_width - 1))
+    y = samples / denom
+    y = y / (np.max(np.abs(y)) + 1e-9)
+    if len(y) < 800:
+        return np.zeros(13, dtype=np.float32)
+    n_fft = min(2048, len(y))
+    hop_length = max(1, min(512, n_fft // 4))
+    mfcc = librosa.feature.mfcc(y=y, sr=16000, n_mfcc=13, n_fft=n_fft, hop_length=hop_length)
+    return np.mean(mfcc, axis=1).astype(np.float32)
+
+
+def _cosine_sim_unit(a: np.ndarray, b: np.ndarray) -> float:
+    na = np.linalg.norm(a) + 1e-9
+    nb = np.linalg.norm(b) + 1e-9
+    return float(np.dot(a, b) / (na * nb))
+
+
+def _pick_coherent_non_overlapping(
+    full: AudioSegment,
+    intervals: list[tuple[float, float]],
+    file_duration_s: float,
+    k: int = 3,
+    *,
+    strict_same_voice: bool = False,
+) -> list[tuple[float, float, float]]:
+    """
+    Pick non-overlapping clips ranked by score, but prefer segments whose exported audio
+    matches the best-scoring (anchor) clip in MFCC space. Reduces cases where pyannote
+    assigns one label to acoustically different regions (e.g. same person mis-clustered
+    with another voice or noise).
+    """
+    scored: list[tuple[float, float, float]] = []
+    for a, b in intervals:
+        if b - a < 0.2:
+            continue
+        sc = _segment_score(full, a, b, file_duration_s)
+        scored.append((a, b, sc))
+    if not scored:
+        return []
+    scored.sort(key=lambda x: -x[2])
+    pool = scored[:30]
+
+    try:
+        anchor = pool[0]
+        ref = _mfcc_profile_for_interval(full, anchor[0], anchor[1])
+    except Exception:
+        logger.debug("MFCC coherence skipped; using score-only selection", exc_info=True)
+        return _pick_top_non_overlapping(full, intervals, file_duration_s, k)
+
+    # Stricter when diarization only found one speaker (often one human + label noise).
+    sim_high = 0.80 if strict_same_voice else 0.74
+    sim_mid = 0.64 if strict_same_voice else 0.60
+
+    picked: list[tuple[float, float, float]] = [anchor]
+
+    def overlaps_picked(a: float, b: float) -> bool:
+        return any(_overlap((a, b), (p[0], p[1])) for p in picked)
+
+    for a, b, sc in pool[1:]:
+        if len(picked) >= k:
+            break
+        if overlaps_picked(a, b):
+            continue
+        if _cosine_sim_unit(ref, _mfcc_profile_for_interval(full, a, b)) >= sim_high:
+            picked.append((a, b, sc))
+
+    if len(picked) < k:
+        for a, b, sc in pool[1:]:
+            if len(picked) >= k:
+                break
+            if overlaps_picked(a, b):
+                continue
+            if (a, b, sc) in picked:
+                continue
+            if _cosine_sim_unit(ref, _mfcc_profile_for_interval(full, a, b)) >= sim_mid:
+                picked.append((a, b, sc))
+
+    if len(picked) < k:
+        for a, b, sc in pool[1:]:
+            if len(picked) >= k:
+                break
+            if overlaps_picked(a, b):
+                continue
+            if (a, b, sc) in picked:
+                continue
+            picked.append((a, b, sc))
+
+    return picked[:k]
+
+
 def _collect_diarization_intervals(diarization: Any) -> dict[str, list[tuple[float, float]]]:
     by_sp: dict[str, list[tuple[float, float]]] = {}
     for segment, _, label in diarization.itertracks(yield_label=True):
@@ -256,7 +356,13 @@ class SpeakerIsolationService:
                     break
                 intervals = by_speaker.get(pyannote_id, [])
                 total_s = sum(max(0.0, b - a) for a, b in intervals)
-                picks = _pick_top_non_overlapping(full_audio, intervals, duration_sec, k=3)
+                picks = _pick_coherent_non_overlapping(
+                    full_audio,
+                    intervals,
+                    duration_sec,
+                    k=3,
+                    strict_same_voice=(len(ordered_ids) == 1),
+                )
                 processed += 1
                 job["progress_pct"] = min(90, 45 + int(40 * processed / id_count))
 
