@@ -134,20 +134,31 @@ class OllamaClient:
             "transcript_segments": segments_payload,
         }
         user_text = (
-            "Task: Identify only advertisement, sponsor-read, or promotional time ranges. "
-            "Do not summarize the episode, do not describe topics, and do not write prose. "
-            "Fill the response schema with ad_segments only.\n\n"
+            "Below is a podcast transcript broken into time-stamped blocks. "
+            "Each block is a coherent chunk of speech. Identify ONLY the blocks that are "
+            "paid advertisements, sponsor reads, or promotional spots. "
+            "Return ad_segments with the start/end times and brand name.\n\n"
             + json.dumps(payload, ensure_ascii=False)
         )
 
-        system = """You mark discrete paid advertisements and sponsor reads in a timestamped transcript.
-Respond using the required JSON schema only: object with key "ad_segments" (array).
-Each element: start_seconds, end_seconds, label (short brand or product name), confidence (0-1).
+        system = """You are a podcast ad detector. You receive timestamped text blocks from a podcast episode.
 
-CRITICAL: The podcast's own show title, network name, or channel (e.g. a name repeated throughout most of the episode as normal speech) is NOT an advertisement. Do not tag continuous main discussion or news under that name as an ad—only separate sponsor spots, promos, and third-party product reads.
+PODCAST STRUCTURE:
+- Podcasts have short ad/sponsor blocks (10-90 seconds each), usually clustered at the beginning (pre-roll), middle (mid-roll), and/or end (post-roll) of the episode.
+- The LONGEST block(s) of speech are almost always the MAIN SHOW CONTENT: news, commentary, interviews, discussion. This is NEVER an ad, even if it mentions a network or show name.
+- Ads are recognizable by: brand pitches, discount codes, URLs (e.g. "slash podcast"), calls to action ("visit", "use code", "sign up"), product descriptions, military recruitment, insurance offers, or "brought to you by" language.
 
-Do NOT include regular news reporting, story segments, interviews, or non-sponsored main discussion.
-Merge adjacent lines for the same sponsor into one interval. Times must be within [0, total_duration_seconds]. If no discrete ads, use "ad_segments": []."""
+RULES:
+1. Only tag discrete paid sponsor reads, product advertisements, recruitment spots (e.g. military), and promotional breaks.
+2. Do NOT tag the main episode discussion, news reporting, political commentary, opinion segments, or any block that is editorial content.
+3. A single block may contain MULTIPLE back-to-back ads from different brands. Return one ad_segments entry per brand/sponsor, using the approximate time boundaries within that block.
+4. The show's own name, network, or channel is NOT an ad.
+5. start_seconds and end_seconds must stay within [0, total_duration_seconds].
+6. label = short brand or product name (e.g. "USAA", "Shopify", "Mint Mobile").
+7. confidence = 0-1 indicating how certain you are this is a paid ad.
+8. If no ads exist, return "ad_segments": [].
+
+Respond using the required JSON schema only."""
 
         request_body: Dict[str, Any] = {
             "model": model,

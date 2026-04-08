@@ -131,6 +131,53 @@ class AdScanService:
             )
         return out
 
+    @staticmethod
+    def _merge_into_blocks(
+        segments: list[dict[str, Any]],
+        gap_threshold: float = 3.0,
+    ) -> list[dict[str, Any]]:
+        """
+        Merge consecutive Whisper segments into larger blocks when the silence gap between them
+        is less than gap_threshold seconds.  This gives the LLM coherent paragraphs (e.g. a full
+        30-second ad read) instead of dozens of 3-second lines.
+        """
+        if not segments:
+            return []
+        sorted_segs = sorted(segments, key=lambda s: s["start_seconds"])
+        blocks: list[dict[str, Any]] = []
+        cur_start = sorted_segs[0]["start_seconds"]
+        cur_end = sorted_segs[0]["end_seconds"]
+        cur_texts: list[str] = [sorted_segs[0].get("text") or ""]
+
+        for seg in sorted_segs[1:]:
+            seg_start = seg["start_seconds"]
+            seg_end = seg["end_seconds"]
+            seg_text = (seg.get("text") or "").strip()
+            if seg_start - cur_end <= gap_threshold:
+                cur_end = max(cur_end, seg_end)
+                if seg_text:
+                    cur_texts.append(seg_text)
+            else:
+                joined = " ".join(t for t in cur_texts if t).strip()
+                if joined:
+                    blocks.append({
+                        "start_seconds": round(cur_start, 2),
+                        "end_seconds": round(cur_end, 2),
+                        "text": joined,
+                    })
+                cur_start = seg_start
+                cur_end = seg_end
+                cur_texts = [seg_text]
+
+        joined = " ".join(t for t in cur_texts if t).strip()
+        if joined:
+            blocks.append({
+                "start_seconds": round(cur_start, 2),
+                "end_seconds": round(cur_end, 2),
+                "text": joined,
+            })
+        return blocks
+
     async def _run_job(self, job_id: str, audio_path: str) -> None:
         job = self._jobs.get(job_id)
         if not job:
@@ -170,27 +217,29 @@ class AdScanService:
                 f"[ad-scan] job={job_id} whisper_raw_segments_json (pre-normalize, count={len(raw_segments)})",
                 json.dumps(raw_segments, ensure_ascii=False, indent=2),
             )
-            segments_payload = self._normalize_whisper_segments(raw_segments, duration_sec)
+            fine_segments = self._normalize_whisper_segments(raw_segments, duration_sec)
+            blocks = self._merge_into_blocks(fine_segments, gap_threshold=1.5)
             lang = transcript.get("language")
             plain_text = " ".join(
-                (s.get("text") or "").strip() for s in segments_payload if (s.get("text") or "").strip()
+                (s.get("text") or "").strip() for s in fine_segments if (s.get("text") or "").strip()
             )
-            segments_json = json.dumps(segments_payload, ensure_ascii=False, indent=2)
 
             logger.info(
                 "[ad-scan] job=%s transcription_done duration_sec=%.3f transcribe_wall_s=%.2f "
-                "segments_count=%d language=%s plain_text_chars=%d",
+                "fine_segments=%d merged_blocks=%d language=%s plain_text_chars=%d",
                 job_id,
                 duration_sec,
                 transcribe_s,
-                len(segments_payload),
+                len(fine_segments),
+                len(blocks),
                 lang,
                 len(plain_text),
             )
             _log_ad_scan_blob(f"[ad-scan] job={job_id} transcription_plain_text", plain_text)
+            blocks_json = json.dumps(blocks, ensure_ascii=False, indent=2)
             _log_ad_scan_blob(
-                f"[ad-scan] job={job_id} transcription_segments_json (for LLM, normalized)",
-                segments_json,
+                f"[ad-scan] job={job_id} merged_blocks_json (sent to LLM, count={len(blocks)})",
+                blocks_json,
             )
 
             job["status"] = "analyzing"
@@ -200,7 +249,7 @@ class AdScanService:
             t_llm = time.perf_counter()
             ad_raw = await asyncio.to_thread(
                 ollama_client.identify_podcast_ad_segments,
-                segments_payload,
+                blocks,
                 duration_sec,
                 None,
                 job_id,
