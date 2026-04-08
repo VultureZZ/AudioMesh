@@ -166,6 +166,17 @@ class Config:
     AD_SCAN_MAX_BLOCK_SECONDS: float = float(os.getenv("AD_SCAN_MAX_BLOCK_SECONDS", "45"))
     # Merge when gap between Whisper segments is at most this many seconds (silence).
     AD_SCAN_MERGE_GAP_SECONDS: float = float(os.getenv("AD_SCAN_MERGE_GAP_SECONDS", "1.5"))
+    # After LLM ad detection: merge consecutive ad rows if the gap between them is at most this many
+    # seconds (treats short music/bumpers between spots as part of the ad break).
+    AD_SCAN_AD_CLUSTER_GAP_SECONDS: float = float(os.getenv("AD_SCAN_AD_CLUSTER_GAP_SECONDS", "5"))
+    # If the first ad starts within this many seconds of 0:00, extend its start to 0 (intro/bumper).
+    AD_SCAN_AD_CLUSTER_PAD_START_SECONDS: float = float(
+        os.getenv("AD_SCAN_AD_CLUSTER_PAD_START_SECONDS", "5")
+    )
+    # If the last ad ends within this many seconds of the file end, extend its end to EOF (outro silence).
+    AD_SCAN_AD_CLUSTER_PAD_END_SECONDS: float = float(
+        os.getenv("AD_SCAN_AD_CLUSTER_PAD_END_SECONDS", "5")
+    )
 
     def __init__(self):
         """Initialize configuration and ensure directories exist."""

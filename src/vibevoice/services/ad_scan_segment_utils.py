@@ -131,3 +131,114 @@ def is_commercial_ad_segment(segment: dict[str, Any]) -> bool:
 
 def commercial_ad_segments_only(segments: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return [s for s in segments if isinstance(s, dict) and is_commercial_ad_segment(s)]
+
+
+def _combine_ad_labels(a: str, b: str) -> str:
+    a, b = (a or "").strip(), (b or "").strip()
+    if not a:
+        return b or "ad"
+    if not b or a == b:
+        return a
+    return f"{a} · {b}"
+
+
+def merge_adjacent_ad_segments(
+    segments: list[dict[str, Any]],
+    total_duration_seconds: float,
+    *,
+    max_gap_seconds: float | None = None,
+    pad_start_seconds: float | None = None,
+    pad_end_seconds: float | None = None,
+    job_id: str | None = None,
+) -> list[dict[str, Any]]:
+    """
+    Cluster detected ads: bridge gaps (music/bumpers) between spots, pad start toward 0:00 when the
+    first spot begins soon after the file start, and pad the last spot through short trailing silence.
+    """
+    if not segments or total_duration_seconds <= 0:
+        return segments
+    td = float(total_duration_seconds)
+    gap_max = (
+        max_gap_seconds
+        if max_gap_seconds is not None
+        else float(getattr(config, "AD_SCAN_AD_CLUSTER_GAP_SECONDS", 5.0))
+    )
+    pad_s = (
+        pad_start_seconds
+        if pad_start_seconds is not None
+        else float(getattr(config, "AD_SCAN_AD_CLUSTER_PAD_START_SECONDS", 5.0))
+    )
+    pad_e = (
+        pad_end_seconds
+        if pad_end_seconds is not None
+        else float(getattr(config, "AD_SCAN_AD_CLUSTER_PAD_END_SECONDS", 5.0))
+    )
+
+    rows: list[dict[str, Any]] = []
+    for s in segments:
+        if not isinstance(s, dict):
+            continue
+        try:
+            a = float(s["start_seconds"])
+            b = float(s["end_seconds"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        a = max(0.0, min(a, td))
+        b = max(0.0, min(b, td))
+        if b <= a:
+            continue
+        lab = str(s.get("label", "ad")).strip() or "ad"
+        try:
+            conf = float(s.get("confidence", 0.5))
+        except (TypeError, ValueError):
+            conf = 0.5
+        conf = max(0.0, min(1.0, conf))
+        rows.append({"start_seconds": a, "end_seconds": b, "label": lab, "confidence": conf})
+
+    rows.sort(key=lambda x: x["start_seconds"])
+    merged: list[dict[str, Any]] = []
+    for r in rows:
+        if not merged:
+            merged.append(dict(r))
+            continue
+        prev = merged[-1]
+        gap_between = r["start_seconds"] - prev["end_seconds"]
+        if gap_between <= gap_max:
+            prev["end_seconds"] = max(prev["end_seconds"], r["end_seconds"])
+            prev["label"] = _combine_ad_labels(prev["label"], r["label"])
+            prev["confidence"] = max(prev["confidence"], r["confidence"])
+        else:
+            merged.append(dict(r))
+
+    if merged and merged[0]["start_seconds"] <= pad_s:
+        merged[0]["start_seconds"] = 0.0
+
+    if merged:
+        tail = td - merged[-1]["end_seconds"]
+        if 0 < tail <= pad_e:
+            merged[-1]["end_seconds"] = td
+
+    jid = job_id or "-"
+    if len(merged) != len(rows):
+        logger.info(
+            "[ad-scan] job=%s ad_cluster_merge raw_rows=%d merged=%d gap_max=%.2fs pad_start=%.2fs pad_end=%.2fs",
+            jid,
+            len(rows),
+            len(merged),
+            gap_max,
+            pad_s,
+            pad_e,
+        )
+    elif merged and merged[0]["start_seconds"] == 0.0 and rows and rows[0]["start_seconds"] > 0:
+        logger.info(
+            "[ad-scan] job=%s ad_cluster_merge padded_first_start_to_zero (was %.3fs)",
+            jid,
+            rows[0]["start_seconds"],
+        )
+    elif merged and rows and merged[-1]["end_seconds"] > rows[-1]["end_seconds"]:
+        logger.info(
+            "[ad-scan] job=%s ad_cluster_merge padded_last_end_to_eof",
+            jid,
+        )
+
+    return merged
