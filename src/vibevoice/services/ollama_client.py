@@ -29,26 +29,29 @@ def _ad_scan_log_blob(prefix: str, text: str) -> None:
     )
 
 
-# JSON Schema for Ollama structured outputs (/api/chat `format`); prevents prose summaries.
-_AD_DETECTION_RESPONSE_SCHEMA: Dict[str, Any] = {
+# Per-block classification: timestamps come from our block boundaries, not model-invented ranges.
+_AD_BLOCK_CLASSIFICATION_SCHEMA: Dict[str, Any] = {
     "type": "object",
     "properties": {
-        "ad_segments": {
+        "block_classifications": {
             "type": "array",
-            "description": "Advertisement, sponsor read, or promo intervals; empty if none detected.",
+            "description": "One entry per transcript block index; is_ad true only for sponsor/ad blocks.",
             "items": {
                 "type": "object",
                 "properties": {
-                    "start_seconds": {"type": "number"},
-                    "end_seconds": {"type": "number"},
-                    "label": {"type": "string"},
+                    "block_index": {"type": "integer"},
+                    "is_ad": {"type": "boolean"},
+                    "label": {
+                        "type": "string",
+                        "description": "Brand name if is_ad; otherwise short reason e.g. main episode",
+                    },
                     "confidence": {"type": "number"},
                 },
-                "required": ["start_seconds", "end_seconds", "label", "confidence"],
+                "required": ["block_index", "is_ad", "label", "confidence"],
             },
         },
     },
-    "required": ["ad_segments"],
+    "required": ["block_classifications"],
 }
 
 # Omit bulky fields from profile text sent to the script LLM (reference audio transcript, etc.)
@@ -129,34 +132,42 @@ class OllamaClient:
         """
         jid = job_id or "-"
         model = custom_model or self.model
+        if not segments_payload:
+            return []
+        indexed_blocks = [
+            {
+                "block_index": i,
+                "start_seconds": round(float(b["start_seconds"]), 3),
+                "end_seconds": round(float(b["end_seconds"]), 3),
+                "text": (b.get("text") or "").strip(),
+            }
+            for i, b in enumerate(segments_payload)
+        ]
+        n_blocks = len(indexed_blocks)
         payload = {
             "total_duration_seconds": round(total_duration_seconds, 3),
-            "transcript_segments": segments_payload,
+            "block_count": n_blocks,
+            "transcript_blocks": indexed_blocks,
         }
         user_text = (
-            "Below is a podcast transcript broken into time-stamped blocks. "
-            "Each block is a coherent chunk of speech. Identify ONLY the blocks that are "
-            "paid advertisements, sponsor reads, or promotional spots. "
-            "Return ad_segments with the start/end times and brand name.\n\n"
+            "Classify EACH transcript block by index. Blocks are short (typically under a minute); "
+            "timestamps are fixed—you must NOT invent start/end times.\n\n"
             + json.dumps(payload, ensure_ascii=False)
         )
 
-        system = """You are a podcast ad detector. You receive timestamped text blocks from a podcast episode.
+        last_idx = max(0, n_blocks - 1)
+        system = f"""You classify fixed transcript blocks from a podcast. There are exactly {n_blocks} blocks with indices 0 through {last_idx}.
 
-PODCAST STRUCTURE:
-- Podcasts have short ad/sponsor blocks (10-90 seconds each), usually clustered at the beginning (pre-roll), middle (mid-roll), and/or end (post-roll) of the episode.
-- The LONGEST block(s) of speech are almost always the MAIN SHOW CONTENT: news, commentary, interviews, discussion. This is NEVER an ad, even if it mentions a network or show name.
-- Ads are recognizable by: brand pitches, discount codes, URLs (e.g. "slash podcast"), calls to action ("visit", "use code", "sign up"), product descriptions, military recruitment, insurance offers, or "brought to you by" language.
+OUTPUT: Return block_classifications with EXACTLY one object per block_index (0..{last_idx}). Do not omit blocks.
 
-RULES:
-1. Only tag discrete paid sponsor reads, product advertisements, recruitment spots (e.g. military), and promotional breaks.
-2. Do NOT tag the main episode discussion, news reporting, political commentary, opinion segments, or any block that is editorial content.
-3. A single block may contain MULTIPLE back-to-back ads from different brands. Return one ad_segments entry per brand/sponsor, using the approximate time boundaries within that block.
-4. The show's own name, network, or channel is NOT an ad.
-5. start_seconds and end_seconds must stay within [0, total_duration_seconds].
-6. label = short brand or product name (e.g. "USAA", "Shopify", "Mint Mobile").
-7. confidence = 0-1 indicating how certain you are this is a paid ad.
-8. If no ads exist, return "ad_segments": [].
+For each block set:
+- is_ad = true if the block is primarily: a paid third-party advertisement or sponsor read; military recruitment; insurance/product/retail pitch; OR the show's own subscription/premium upsell (Substack, Patreon, "become a subscriber", member perks) when it is clearly promotional.
+- is_ad = false for main episode content: news, commentary, interviews, political discussion, reading long statements—even if it names brands in passing or says "Midas Touch Network" as the show.
+- label: if is_ad, short brand or offer name (e.g. USAA, Shopify, MidasPlus). If not is_ad, use "Main content".
+
+Heuristics:
+- Many consecutive blocks of dense news/commentary are main content; short, brand-heavy blocks at the very start or very end are often ads.
+- When unsure, prefer is_ad = false so we do not delete the episode audio.
 
 Respond using the required JSON schema only."""
 
@@ -167,7 +178,7 @@ Respond using the required JSON schema only."""
                 {"role": "user", "content": user_text},
             ],
             "stream": False,
-            "format": _AD_DETECTION_RESPONSE_SCHEMA,
+            "format": _AD_BLOCK_CLASSIFICATION_SCHEMA,
             "options": {
                 "temperature": 0,
                 "top_p": 0.9,
@@ -176,7 +187,7 @@ Respond using the required JSON schema only."""
 
         logger.info(
             "[ad-scan] job=%s ollama_ad_request base_url=%s model=%s "
-            "transcript_segments_in_payload=%d user_message_chars=%d",
+            "transcript_blocks_in_payload=%d user_message_chars=%d",
             jid,
             self.base_url,
             model,
@@ -223,14 +234,30 @@ Respond using the required JSON schema only."""
             _ad_scan_log_blob(f"[ad-scan] job={jid} ollama_message_content_raw", raw or "(empty)")
             if not raw:
                 raise RuntimeError("Ollama returned empty response for ad detection")
-            parsed_list = self._parse_ad_segments_json(raw)
-            validated = self._validate_ad_segment_dicts(parsed_list, total_duration_seconds)
-            logger.info(
-                "[ad-scan] job=%s ollama_parsed_list_len=%d validated_ad_intervals=%d",
-                jid,
-                len(parsed_list),
-                len(validated),
-            )
+            parsed_obj = self._parse_json_payload(raw)
+            if isinstance(parsed_obj, dict) and "block_classifications" in parsed_obj:
+                validated = self._block_classifications_to_ad_segments(
+                    segments_payload,
+                    parsed_obj.get("block_classifications"),
+                    total_duration_seconds,
+                )
+                logger.info(
+                    "[ad-scan] job=%s ollama_block_classifications=%d validated_ad_intervals=%d",
+                    jid,
+                    len(parsed_obj.get("block_classifications") or []),
+                    len(validated),
+                )
+            else:
+                parsed_list = self._coerce_to_segment_list(parsed_obj)
+                if parsed_list is None:
+                    raise ValueError("Could not parse ad detection response (expected block_classifications or ad_segments)")
+                validated = self._validate_ad_segment_dicts(parsed_list, total_duration_seconds)
+                logger.info(
+                    "[ad-scan] job=%s ollama_parsed_list_len=%d validated_ad_intervals=%d",
+                    jid,
+                    len(parsed_list),
+                    len(validated),
+                )
             _ad_scan_log_blob(
                 f"[ad-scan] job={jid} ollama_validated_ad_segments (after time/clamp filter)",
                 json.dumps(validated, ensure_ascii=False, indent=2),
@@ -279,22 +306,18 @@ Respond using the required JSON schema only."""
                 return val
         return None
 
-    def _parse_ad_segments_json(self, raw: str) -> List[Any]:
+    def _parse_json_payload(self, raw: str) -> Any:
+        """Parse JSON object/array from model output (may be wrapped in fences or commentary)."""
         cleaned = self._strip_markdown_fence(raw)
         if not cleaned:
             raise ValueError("Empty ad detection response")
 
-        # 1) Whole string parses as JSON
         for candidate in (cleaned, cleaned.lstrip()):
             try:
-                parsed = json.loads(candidate)
-                as_list = self._coerce_to_segment_list(parsed)
-                if as_list is not None:
-                    return as_list
+                return json.loads(candidate)
             except json.JSONDecodeError:
                 continue
 
-        # 2) First JSON array or object embedded in extra model commentary
         dec = json.JSONDecoder()
         for opener in ("[", "{"):
             pos = 0
@@ -304,20 +327,69 @@ Respond using the required JSON schema only."""
                     break
                 try:
                     parsed, _ = dec.raw_decode(cleaned[i:])
-                    as_list = self._coerce_to_segment_list(parsed)
-                    if as_list is not None:
-                        return as_list
+                    return parsed
                 except json.JSONDecodeError:
                     pass
                 pos = i + 1
 
         snippet = cleaned[:800].replace("\n", " ")
         logger.warning(
-            "Could not parse ad segments JSON (first ~800 chars): %s%s",
+            "Could not parse JSON (first ~800 chars): %s%s",
             snippet,
             "..." if len(cleaned) > 800 else "",
         )
-        raise ValueError("Could not parse JSON array from ad detection response")
+        raise ValueError("Could not parse JSON from ad detection response")
+
+    def _block_classifications_to_ad_segments(
+        self,
+        blocks: List[Dict[str, Any]],
+        classifications: Any,
+        total_duration_seconds: float,
+    ) -> List[Dict[str, Any]]:
+        """Map per-block is_ad flags to ad_segments using each block's start/end (authoritative)."""
+        if not isinstance(classifications, list):
+            return []
+        td = max(0.0, float(total_duration_seconds))
+        # Last classification wins if the model repeats a block_index.
+        ad_by_index: Dict[int, Dict[str, Any]] = {}
+        for item in classifications:
+            if not isinstance(item, dict):
+                continue
+            try:
+                idx = int(item.get("block_index", -1))
+            except (TypeError, ValueError):
+                continue
+            if idx < 0 or idx >= len(blocks):
+                logger.debug("[ad-scan] block_classification skip bad index=%s blocks=%d", idx, len(blocks))
+                continue
+            is_ad = bool(item.get("is_ad", item.get("is_advertisement", False)))
+            if not is_ad:
+                continue
+            label = str(item.get("label", "ad")).strip() or "ad"
+            try:
+                conf = float(item.get("confidence", 0.5))
+            except (TypeError, ValueError):
+                conf = 0.5
+            conf = max(0.0, min(1.0, conf))
+            blk = blocks[idx]
+            try:
+                start = float(blk["start_seconds"])
+                end = float(blk["end_seconds"])
+            except (KeyError, TypeError, ValueError):
+                continue
+            start = max(0.0, min(start, td))
+            end = max(0.0, min(end, td))
+            if end <= start or end - start < 0.05:
+                continue
+            ad_by_index[idx] = {
+                "start_seconds": start,
+                "end_seconds": end,
+                "label": label,
+                "confidence": conf,
+            }
+        out = list(ad_by_index.values())
+        out.sort(key=lambda x: x["start_seconds"])
+        return out
 
     def _validate_ad_segment_dicts(
         self, parsed: List[Any], total_duration_seconds: float

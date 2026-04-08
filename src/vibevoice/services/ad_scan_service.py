@@ -134,48 +134,60 @@ class AdScanService:
     @staticmethod
     def _merge_into_blocks(
         segments: list[dict[str, Any]],
-        gap_threshold: float = 3.0,
+        gap_threshold: float = 1.5,
+        max_block_seconds: float = 45.0,
     ) -> list[dict[str, Any]]:
         """
-        Merge consecutive Whisper segments into larger blocks when the silence gap between them
-        is less than gap_threshold seconds.  This gives the LLM coherent paragraphs (e.g. a full
-        30-second ad read) instead of dozens of 3-second lines.
+        Merge consecutive Whisper segments into blocks when the gap between them is small.
+        Also caps each block at max_block_seconds so ads + main episode never merge into one LLM
+        input (Whisper often reports 0s gap between an ad end and the first news line).
         """
         if not segments:
             return []
         sorted_segs = sorted(segments, key=lambda s: s["start_seconds"])
         blocks: list[dict[str, Any]] = []
-        cur_start = sorted_segs[0]["start_seconds"]
-        cur_end = sorted_segs[0]["end_seconds"]
+        cur_start = float(sorted_segs[0]["start_seconds"])
+        cur_end = float(sorted_segs[0]["end_seconds"])
         cur_texts: list[str] = [sorted_segs[0].get("text") or ""]
 
-        for seg in sorted_segs[1:]:
-            seg_start = seg["start_seconds"]
-            seg_end = seg["end_seconds"]
-            seg_text = (seg.get("text") or "").strip()
-            if seg_start - cur_end <= gap_threshold:
-                cur_end = max(cur_end, seg_end)
-                if seg_text:
-                    cur_texts.append(seg_text)
-            else:
-                joined = " ".join(t for t in cur_texts if t).strip()
-                if joined:
-                    blocks.append({
+        def flush() -> None:
+            joined = " ".join(t for t in cur_texts if t).strip()
+            if joined:
+                blocks.append(
+                    {
                         "start_seconds": round(cur_start, 2),
                         "end_seconds": round(cur_end, 2),
                         "text": joined,
-                    })
+                    }
+                )
+
+        for seg in sorted_segs[1:]:
+            seg_start = float(seg["start_seconds"])
+            seg_end = float(seg["end_seconds"])
+            seg_text = (seg.get("text") or "").strip()
+            gap = seg_start - cur_end
+            merged_end = max(cur_end, seg_end)
+            merged_span = merged_end - cur_start
+
+            if gap > gap_threshold:
+                flush()
                 cur_start = seg_start
                 cur_end = seg_end
                 cur_texts = [seg_text]
+                continue
 
-        joined = " ".join(t for t in cur_texts if t).strip()
-        if joined:
-            blocks.append({
-                "start_seconds": round(cur_start, 2),
-                "end_seconds": round(cur_end, 2),
-                "text": joined,
-            })
+            if merged_span > max_block_seconds and (cur_end - cur_start) >= 0.05:
+                flush()
+                cur_start = seg_start
+                cur_end = seg_end
+                cur_texts = [seg_text]
+                continue
+
+            cur_end = merged_end
+            if seg_text:
+                cur_texts.append(seg_text)
+
+        flush()
         return blocks
 
     async def _run_job(self, job_id: str, audio_path: str) -> None:
@@ -218,7 +230,11 @@ class AdScanService:
                 json.dumps(raw_segments, ensure_ascii=False, indent=2),
             )
             fine_segments = self._normalize_whisper_segments(raw_segments, duration_sec)
-            blocks = self._merge_into_blocks(fine_segments, gap_threshold=1.5)
+            blocks = self._merge_into_blocks(
+                fine_segments,
+                gap_threshold=float(getattr(config, "AD_SCAN_MERGE_GAP_SECONDS", 1.5)),
+                max_block_seconds=float(getattr(config, "AD_SCAN_MAX_BLOCK_SECONDS", 45.0)),
+            )
             lang = transcript.get("language")
             plain_text = " ".join(
                 (s.get("text") or "").strip() for s in fine_segments if (s.get("text") or "").strip()

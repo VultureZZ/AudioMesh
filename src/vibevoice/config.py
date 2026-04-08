@@ -162,6 +162,10 @@ class Config:
     AD_SCAN_DOMINANT_LABEL_MIN_FRACTION: float = float(
         os.getenv("AD_SCAN_DOMINANT_LABEL_MIN_FRACTION", "0.45")
     )
+    # Merge adjacent Whisper lines into LLM blocks: max wall-clock size (prevents one 15+ min block).
+    AD_SCAN_MAX_BLOCK_SECONDS: float = float(os.getenv("AD_SCAN_MAX_BLOCK_SECONDS", "45"))
+    # Merge when gap between Whisper segments is at most this many seconds (silence).
+    AD_SCAN_MERGE_GAP_SECONDS: float = float(os.getenv("AD_SCAN_MERGE_GAP_SECONDS", "1.5"))
 
     def __init__(self):
         """Initialize configuration and ensure directories exist."""
