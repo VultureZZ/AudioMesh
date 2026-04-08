@@ -110,6 +110,10 @@ class Config:
     HF_TOKEN: Optional[str] = os.getenv("HF_TOKEN", None)
     # Pyannote speaker-diarization pipeline: auto = CUDA if available, else CPU; or cuda:0, cpu, etc.
     DIARIZATION_DEVICE: str = os.getenv("DIARIZATION_DEVICE", "auto")
+    # Speaker Voice Isolator: infer display names from short intro audio (Whisper + regex / optional Ollama).
+    # off | regex | ollama | both  (both = regex first, then Ollama if no match; requires Ollama for LLM step)
+    SPEAKER_NAME_INFERENCE: str = os.getenv("SPEAKER_NAME_INFERENCE", "regex")
+    SPEAKER_NAME_INTRO_MAX_SECONDS: float = float(os.getenv("SPEAKER_NAME_INTRO_MAX_SECONDS", "45"))
     TRANSCRIPT_WHISPER_MODEL: str = os.getenv("TRANSCRIPT_WHISPER_MODEL", "large-v3")
     TRANSCRIPT_MAX_UPLOAD_MB: int = int(os.getenv("TRANSCRIPT_MAX_UPLOAD_MB", "500"))
     TRANSCRIPT_SUPPORTED_FORMATS: list[str] = [

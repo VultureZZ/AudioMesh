@@ -18,6 +18,7 @@ from pydub import AudioSegment
 
 from ..config import config
 from ..core.transcripts.diarizer import transcript_diarizer
+from .speaker_name_inference import infer_speaker_labels_for_isolation
 
 logger = logging.getLogger(__name__)
 
@@ -398,6 +399,21 @@ class SpeakerIsolationService:
                         "clips": clips_out,
                     }
                 )
+
+            mode = (config.SPEAKER_NAME_INFERENCE or "regex").strip().lower()
+            if mode not in ("", "off", "false", "0", "no") and speakers_payload:
+                job["status"] = "inferring_names"
+                job["current_stage"] = "Inferring speaker names..."
+                job["progress_pct"] = min(94, job.get("progress_pct", 90))
+                await infer_speaker_labels_for_isolation(
+                    full_audio=full_audio,
+                    by_speaker=by_speaker,
+                    speakers_payload=speakers_payload,
+                    job_dir=self._job_output_dir(job_id),
+                )
+                for sp in speakers_payload:
+                    if sp.get("label_source") is None:
+                        sp["label_source"] = "default"
 
             result_path = self._job_output_dir(job_id) / "result.json"
             result_path.write_text(

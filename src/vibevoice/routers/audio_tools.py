@@ -45,6 +45,7 @@ def _isolation_status_response(row: dict) -> SpeakerIsolationStatusResponse:
                     label=s["label"],
                     total_speaking_seconds=float(s["total_speaking_seconds"]),
                     clips=clips,
+                    label_source=s.get("label_source"),
                 )
             )
     return SpeakerIsolationStatusResponse(

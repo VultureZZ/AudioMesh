@@ -853,6 +853,43 @@ Generate the complete podcast script now:"""
 
         return cleaned_script
 
+    def infer_speaker_display_name_from_transcript(self, transcript: str) -> Optional[str]:
+        """
+        Extract a single self-introduced name from a short transcript, or None.
+        Used by Speaker Voice Isolator when SPEAKER_NAME_INFERENCE includes ollama/both.
+        """
+        text = (transcript or "").strip()
+        if len(text) < 4:
+            return None
+        system = (
+            "You read a short transcript of one person speaking. "
+            "If they clearly introduce themselves by name (examples: 'I'm Jordan', "
+            "'My name is Maria Garcia', 'Call me Sam'), reply with ONLY that name "
+            "using letters and spaces (1-4 words). "
+            "If there is no clear self-introduction, or you are unsure, reply with exactly: NONE"
+        )
+        user = f"Transcript:\n{text[:2500]}"
+        request_body: Dict[str, Any] = {
+            "model": self.model,
+            "messages": [
+                {"role": "system", "content": system},
+                {"role": "user", "content": user},
+            ],
+            "stream": False,
+            "options": {"temperature": 0.1, "top_p": 0.9},
+        }
+        try:
+            response = self.client.post(f"{self.base_url}/api/chat", json=request_body, timeout=90)
+            response.raise_for_status()
+            raw = ((response.json() or {}).get("message") or {}).get("content") or ""
+            raw = raw.strip().strip('"').strip("'")
+            if not raw or raw.upper() == "NONE":
+                return None
+            return raw
+        except Exception as exc:
+            logger.warning("Ollama speaker name inference failed: %s", exc)
+            return None
+
     def __del__(self):
         """Clean up HTTP client."""
         if hasattr(self, "client"):

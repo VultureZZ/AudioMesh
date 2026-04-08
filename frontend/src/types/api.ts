@@ -513,6 +513,7 @@ export interface SpeakerIsolationSpeakerItem {
   label: string;
   total_speaking_seconds: number;
   clips: SpeakerIsolationClipItem[];
+  label_source?: 'inferred' | 'default' | string | null;
 }
 
 export interface SpeakerIsolationStatusResponse {

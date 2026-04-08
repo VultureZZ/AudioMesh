@@ -569,9 +569,13 @@ class SpeakerIsolationSpeakerItem(BaseModel):
     """One diarized speaker with up to three clips."""
 
     speaker_id: str = Field(..., description="Internal diarization label (e.g. SPEAKER_00)")
-    label: str = Field(..., description='Display label, e.g. "Speaker 1"')
+    label: str = Field(..., description='Display label, e.g. "Speaker 1" or an inferred name')
     total_speaking_seconds: float = Field(..., description="Sum of speech time for this speaker")
     clips: List[SpeakerIsolationClipItem] = Field(default_factory=list)
+    label_source: Optional[str] = Field(
+        None,
+        description='optional: "inferred" if name was detected from speech, else "default"',
+    )
 
 
 class SpeakerIsolationStatusResponse(BaseModel):
@@ -580,7 +584,7 @@ class SpeakerIsolationStatusResponse(BaseModel):
     job_id: str
     status: str = Field(
         ...,
-        description="queued | diarizing | extracting | complete | failed",
+        description="queued | diarizing | extracting | inferring_names | complete | failed",
     )
     progress_pct: int = Field(0, ge=0, le=100)
     current_stage: Optional[str] = None

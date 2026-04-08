@@ -52,6 +52,7 @@ function phaseLabel(submitting: boolean, status: SpeakerIsolationStatusResponse 
   if (status.status === 'queued') return 'Running diarization…';
   if (status.status === 'diarizing') return 'Running diarization…';
   if (status.status === 'extracting') return 'Extracting clips…';
+  if (status.status === 'inferring_names') return 'Inferring speaker names…';
   return status.current_stage || status.status;
 }
 
@@ -320,6 +321,9 @@ export function VoiceIsolatorPage() {
                     </span>
                     <div>
                       <h3 className={`text-base font-semibold ${acc.heading}`}>{sp.label}</h3>
+                      {sp.label_source === 'inferred' && (
+                        <p className="text-xs text-gray-500 mt-0.5">Name detected from speech</p>
+                      )}
                       <p className="text-xs text-gray-600 mt-0.5">
                         Total speaking time: {formatTime(sp.total_speaking_seconds)}
                       </p>
