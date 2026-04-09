@@ -64,6 +64,7 @@ def _sanitize_profile_for_prompt(profile: Dict) -> Dict:
 
 
 _CUE_MARKER_BRACKET = re.compile(r"^\s*\[CUE:", re.IGNORECASE)
+_INLINE_PRODUCTION_CUE = re.compile(r"\s*\[CUE:\s*[^\]]+\]\s*", re.IGNORECASE)
 
 
 def _remove_placeholder_brackets(script: str) -> str:
@@ -600,6 +601,7 @@ Respond using the required JSON schema only."""
         voice_names: Optional[List[str]] = None,
         narrator_speaker_index: Optional[int] = None,
         approximate_duration_minutes: Optional[float] = None,
+        include_production_cues: bool = False,
     ) -> str:
         """
         Generate podcast script from article using Ollama.
@@ -616,6 +618,8 @@ Respond using the required JSON schema only."""
                 others are co-hosts, experts, or reactors as appropriate.
             approximate_duration_minutes: Optional target episode length in minutes; drives word-count
                 targets and overrides discrete ``duration`` when set.
+            include_production_cues: If True, prompt includes ``[CUE: ...]`` markers for production mixing.
+                Standard TTS flows should leave this False so scripts contain only spoken dialogue.
 
         Returns:
             Generated podcast script with speaker labels
@@ -641,6 +645,7 @@ Respond using the required JSON schema only."""
             voice_names,
             narrator_speaker_index=narrator_speaker_index,
             approximate_duration_minutes=approximate_duration_minutes,
+            include_production_cues=include_production_cues,
         )
 
         logger.info(f"Generating script with Ollama (model: {model}, genre: {genre}, duration: {duration})")
@@ -667,7 +672,7 @@ Respond using the required JSON schema only."""
                 raise RuntimeError("Ollama returned empty script")
 
             # Clean up the script
-            script = self._clean_script(script, num_voices)
+            script = self._clean_script(script, num_voices, include_production_cues=include_production_cues)
 
             logger.info(f"Generated script: {len(script)} characters")
             return script
@@ -930,6 +935,7 @@ Output the JSON array now:"""
         voice_names: Optional[List[str]] = None,
         narrator_speaker_index: Optional[int] = None,
         approximate_duration_minutes: Optional[float] = None,
+        include_production_cues: bool = False,
     ) -> str:
         """
         Build prompt for Ollama script generation.
@@ -943,6 +949,7 @@ Output the JSON array now:"""
             voice_names: Optional list of voice names in order
             narrator_speaker_index: Optional 1-based index of which speaker is the narrator
             approximate_duration_minutes: Optional minutes target for word-count band
+            include_production_cues: If True, instruct the model to emit ``[CUE: ...]`` production markers
 
         Returns:
             Formatted prompt string
@@ -1018,7 +1025,8 @@ Output the JSON array now:"""
             if any_speaker_profile:
                 voice_profiles_section = "".join(profile_lines)
                 voice_adherence_block = """
-7. **VOICE PROFILE ADHERENCE**
+
+**VOICE PROFILE ADHERENCE**
    - Apply the **VOICE PROFILES** section above to the matching Speaker number; lines must reflect each profile (tone, cadence, structure, vocabulary, and signature phrases when natural).
    - Genre and production specifications set format; profiles set how each person talks. Do not substitute generic dialogue for a defined profile.
 
@@ -1037,6 +1045,29 @@ Output the JSON array now:"""
                 narrator_voice = str(vnames[n - 1]).strip()
             nv = f' (voice name: "{narrator_voice}")' if narrator_voice else ""
             narrator_line = f"\n- Narrator: Speaker {n}{nv} — carries the main through-line of the episode."
+
+        music_cue_section = ""
+        if include_production_cues:
+            music_cue_section = """
+6. MUSIC CUE MARKERS (embed inline as single-line comments)
+   Insert these exact tokens on their own line where audio production cues should occur:
+   [CUE: INTRO_MUSIC]         ← before first spoken word
+   [CUE: TRANSITION_STING]    ← at major story shifts (limit to 3-4 per episode)
+   [CUE: MUSIC_BED_IN]        ← where background score should swell (analysis section)
+   [CUE: MUSIC_BED_OUT]       ← where background score should fade
+   [CUE: OUTRO_MUSIC]         ← after final spoken word
+
+"""
+        do_not_spoken_line = (
+            "- Do not include any text that isn't meant to be spoken or is a music cue marker\n"
+            if include_production_cues
+            else "- Do not include any text that isn't meant to be spoken aloud\n"
+        )
+        script_format_cue_rule = (
+            ""
+            if include_production_cues
+            else "\nDo not include [CUE: ...] lines or any non-dialogue production markers — only speaker lines for text-to-speech.\n"
+        )
 
         prompt = f"""You are an expert podcast script writer specializing in producing broadcast-quality, audio-native dialogue. Your scripts are written for human ears, not human eyes — every word choice, sentence rhythm, and transition must work when spoken aloud.
 
@@ -1060,7 +1091,7 @@ Use ONLY this format. No markdown, no stage directions in prose, no header label
 
 Each speaker turn must be on its own line, prefixed with the speaker label and a colon.
 Blank lines between speaker turns only — no other blank lines.
-Do NOT include stage directions, scene headers, act labels, or any non-dialogue text.
+Do NOT include stage directions, scene headers, act labels, or any non-dialogue text.{script_format_cue_rule}
 
 --- AUDIO WRITING RULES ---
 
@@ -1100,22 +1131,12 @@ Do NOT include stage directions, scene headers, act labels, or any non-dialogue 
    - BODY (~{body_word_count} words): Cover stories by importance. Use verbal signposts: "But here's where it gets interesting..." / "Connecting back to what we covered earlier..." / "And this is the part that surprised me..."
    - EXTENDED ANALYSIS (~{analysis_word_count} words): Deeper dive on the lead story or a cross-story theme. Slower pace, more considered language.
    - CLOSE (final {close_word_count} words): Thematic recap — 2-3 sentences max per key story. End on a forward-looking note. No "thanks for listening" filler.
-
-6. MUSIC CUE MARKERS (embed inline as single-line comments)
-   Insert these exact tokens on their own line where audio production cues should occur:
-   [CUE: INTRO_MUSIC]         ← before first spoken word
-   [CUE: TRANSITION_STING]    ← at major story shifts (limit to 3-4 per episode)
-   [CUE: MUSIC_BED_IN]        ← where background score should swell (analysis section)
-   [CUE: MUSIC_BED_OUT]       ← where background score should fade
-   [CUE: OUTRO_MUSIC]         ← after final spoken word
-
-{voice_adherence_block}
+{music_cue_section}{voice_adherence_block}
 --- DO NOT ---
 - Do not write "(pause)" or "(beat)" — build pauses into sentence structure with em dashes and ellipses
 - Do not write sound effect instructions
 - Do not add "Host:", "Guest:", or role labels — use only the speaker name/label
-- Do not include any text that isn't meant to be spoken or is a music cue marker
-- Do not repeat the episode title or date mid-script
+{do_not_spoken_line}- Do not repeat the episode title or date mid-script
 - Do not let any story segment exceed {max_segment_words} words without a speaker exchange
 
 --- QUALITY CHECK (apply before outputting) ---
@@ -1127,13 +1148,14 @@ Generate the complete podcast script now:"""
 
         return prompt
 
-    def _clean_script(self, script: str, num_voices: int) -> str:
+    def _clean_script(self, script: str, num_voices: int, include_production_cues: bool = False) -> str:
         """
         Clean and format generated script.
 
         Args:
             script: Raw script from Ollama
             num_voices: Expected number of voices
+            include_production_cues: When False, drop ``[CUE: ...]`` lines and inline markers
 
         Returns:
             Cleaned script
@@ -1160,8 +1182,14 @@ Generate the complete podcast script now:"""
                 continue
 
             if _CUE_MARKER_BRACKET.match(line):
-                cleaned_lines.append(line)
+                if include_production_cues:
+                    cleaned_lines.append(line)
                 continue
+
+            if not include_production_cues:
+                line = _INLINE_PRODUCTION_CUE.sub(" ", line).strip()
+                if not line:
+                    continue
 
             # Check if line starts with a speaker label
             has_speaker = any(line.startswith(f"Speaker {i}:") for i in range(1, num_voices + 1))

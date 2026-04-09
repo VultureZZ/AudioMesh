@@ -109,6 +109,7 @@ class PodcastGenerator:
         ollama_url: Optional[str] = None,
         ollama_model: Optional[str] = None,
         approximate_duration_minutes: Optional[float] = None,
+        include_production_cues: bool = False,
     ) -> str:
         """
         Generate podcast script from article URL.
@@ -178,6 +179,7 @@ class PodcastGenerator:
                 voice_profiles=voice_profiles if voice_profiles else None,
                 voice_names=voices,
                 approximate_duration_minutes=approximate_duration_minutes,
+                include_production_cues=include_production_cues,
             )
         else:
             script = self.ollama.generate_script(
@@ -188,6 +190,7 @@ class PodcastGenerator:
                 voice_profiles=voice_profiles if voice_profiles else None,
                 voice_names=voices,
                 approximate_duration_minutes=approximate_duration_minutes,
+                include_production_cues=include_production_cues,
             )
 
         logger.info(f"Generated script: {len(script)} characters")
@@ -204,6 +207,7 @@ class PodcastGenerator:
         ollama_url: Optional[str] = None,
         ollama_model: Optional[str] = None,
         approximate_duration_minutes: Optional[float] = None,
+        include_production_cues: bool = False,
     ) -> str:
         """
         Generate podcast script from raw article text (same pipeline as URL-based generation, without scraping).
@@ -261,6 +265,7 @@ class PodcastGenerator:
                 voice_names=voices,
                 narrator_speaker_index=narrator_speaker_index,
                 approximate_duration_minutes=approximate_duration_minutes,
+                include_production_cues=include_production_cues,
             )
         else:
             script = self.ollama.generate_script(
@@ -272,6 +277,7 @@ class PodcastGenerator:
                 voice_names=voices,
                 narrator_speaker_index=narrator_speaker_index,
                 approximate_duration_minutes=approximate_duration_minutes,
+                include_production_cues=include_production_cues,
             )
 
         logger.info("Generated script from article: %d characters", len(script))

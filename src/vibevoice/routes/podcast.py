@@ -419,6 +419,7 @@ async def generate_podcast_script(
             request.ollama_url,
             request.ollama_model,
             request.approximate_duration_minutes,
+            request.include_production_cues,
         )
         script_segments = await asyncio.to_thread(
             podcast_generator.generate_script_segments,
@@ -517,6 +518,7 @@ async def generate_podcast_script_from_article(
             request.ollama_url,
             request.ollama_model,
             request.approximate_duration_minutes,
+            request.include_production_cues,
         )
         script_segments = await asyncio.to_thread(
             podcast_generator.generate_script_segments,

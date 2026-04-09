@@ -102,6 +102,8 @@ export interface PodcastScriptRequest {
   approximate_duration_minutes?: number;
   ollama_url?: string;
   ollama_model?: string;
+  /** When true, script may include [CUE: ...] markers for production mixing (default false). */
+  include_production_cues?: boolean;
 }
 
 export interface PodcastScriptResponse {

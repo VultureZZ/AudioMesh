@@ -164,6 +164,10 @@ class PodcastScriptRequest(PodcastScriptDurationInputs):
     genre: str = Field(..., description="Podcast genre (Comedy, Serious, News, Educational, Storytelling, Interview, Documentary)")
     ollama_url: Optional[str] = Field(None, description="Optional custom Ollama server URL")
     ollama_model: Optional[str] = Field(None, description="Optional custom Ollama model name")
+    include_production_cues: bool = Field(
+        False,
+        description="If true, script may include [CUE: ...] markers for production mixing; keep false for standard TTS.",
+    )
 
 
 class PodcastArticleScriptRequest(PodcastScriptDurationInputs):
@@ -186,6 +190,10 @@ class PodcastArticleScriptRequest(PodcastScriptDurationInputs):
     genre: str = Field(..., description="Podcast genre (Comedy, Serious, News, Educational, Storytelling, Interview, Documentary)")
     ollama_url: Optional[str] = Field(None, description="Optional custom Ollama server URL")
     ollama_model: Optional[str] = Field(None, description="Optional custom Ollama model name")
+    include_production_cues: bool = Field(
+        False,
+        description="If true, script may include [CUE: ...] markers for production mixing; keep false for standard TTS.",
+    )
 
     @model_validator(mode="after")
     def narrator_index_matches_voice_count(self) -> "PodcastArticleScriptRequest":
