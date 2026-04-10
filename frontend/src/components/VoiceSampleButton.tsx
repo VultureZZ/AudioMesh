@@ -100,16 +100,28 @@ export function VoiceSampleButton({ voice }: VoiceSampleButtonProps) {
       const url = URL.createObjectURL(blob);
       objectUrlRef.current = url;
 
-      const audio = new Audio(url);
+      const audio = new Audio();
+      audio.preload = 'auto';
+      audio.src = url;
       audioRef.current = audio;
       audio.onended = () => cleanupPlayback();
       audio.onerror = () => {
-        setError('Playback failed');
+        setError('Could not decode or play audio (response may not be a valid WAV).');
         cleanupPlayback();
       };
 
       setPlaying(true);
-      await audio.play();
+      try {
+        await audio.play();
+      } catch (playErr) {
+        const msg =
+          playErr instanceof Error
+            ? playErr.message
+            : 'Playback was blocked or failed (try again after interacting with the page).';
+        setError(msg);
+        cleanupPlayback();
+        return;
+      }
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Sample failed';
       setError(msg);

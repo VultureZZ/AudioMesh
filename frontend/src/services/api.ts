@@ -79,20 +79,32 @@ class ApiClient {
       return config;
     });
 
-    // Response interceptor for error handling
+    // Response interceptor for error handling (blob bodies need text parsing — e.g. speech/voice binary routes)
     this.client.interceptors.response.use(
       (response) => response,
-      (error: AxiosError<ErrorResponse>) => {
+      async (error: AxiosError<ErrorResponse>) => {
+        if (error.response?.data instanceof Blob) {
+          const text = await error.response.data.text();
+          let message = error.message;
+          try {
+            const j = JSON.parse(text) as { detail?: string; error?: string };
+            message = j.detail || j.error || message;
+          } catch {
+            if (text.trimStart().startsWith('<!') || text.trimStart().toLowerCase().startsWith('<html')) {
+              message = 'Server returned HTML instead of an API response (check API base URL and proxy).';
+            } else if (text.length > 0) {
+              message = text.slice(0, 280);
+            }
+          }
+          throw new Error(message);
+        }
         if (error.response) {
-          // Server responded with error status
           const errorData = error.response.data;
           const errorMessage = errorData?.detail || errorData?.error || error.message;
-          throw new Error(errorMessage);
+          throw new Error(typeof errorMessage === 'string' ? errorMessage : error.message);
         } else if (error.request) {
-          // Request made but no response received
           throw new Error('Network error: Could not reach the API server');
         } else {
-          // Something else happened
           throw new Error(error.message || 'An unexpected error occurred');
         }
       }
@@ -225,13 +237,45 @@ class ApiClient {
 
   /**
    * Short cached TTS preview for a voice (WAV). Server stores under custom_voices/voice_samples/.
+   * Rejects if the server returns JSON/HTML instead of audio (common misconfiguration when the blob would not play).
    */
   async getVoiceSample(voiceId: string, language?: string): Promise<Blob> {
     const response = await this.client.get(`/api/v1/voices/${encodeURIComponent(voiceId)}/sample`, {
       responseType: 'blob',
       params: language ? { language } : undefined,
     });
-    return response.data;
+    const blob = response.data as Blob;
+    const ct = (response.headers['content-type'] || '').toLowerCase();
+
+    if (ct.includes('application/json') || blob.type === 'application/json') {
+      const text = await blob.text();
+      let j: { detail?: string; error?: string };
+      try {
+        j = JSON.parse(text) as { detail?: string; error?: string };
+      } catch {
+        throw new Error(text.slice(0, 200) || 'Voice sample response was not JSON');
+      }
+      throw new Error(j.detail || j.error || 'Voice sample request failed');
+    }
+
+    if (blob.size < 32) {
+      throw new Error('Voice sample response was empty or too small (check API and voice id).');
+    }
+
+    const head = new Uint8Array(await blob.slice(0, 12).arrayBuffer());
+    const looksLikeWav = head[0] === 0x52 && head[1] === 0x49 && head[2] === 0x46 && head[3] === 0x46;
+    const snippet = await blob.slice(0, 64).text();
+    if (!looksLikeWav && (snippet.trimStart().startsWith('<!') || snippet.trimStart().toLowerCase().startsWith('<html'))) {
+      throw new Error(
+        'Server returned a web page instead of audio. Set Settings API URL to your AudioMesh backend (not the Vite port).'
+      );
+    }
+
+    const mime =
+      ct.includes('audio/') || ct.includes('octet-stream')
+        ? ct.split(';')[0].trim()
+        : 'audio/wav';
+    return blob.type && blob.type.startsWith('audio/') ? blob : new Blob([blob], { type: mime });
   }
 
   /**
