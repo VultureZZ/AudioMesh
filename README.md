@@ -18,6 +18,40 @@ A FastAPI + React project for generating speech, managing voices, and producing 
 - FastAPI backend with a web UI (React + TypeScript)
 - Optional realtime streaming TTS over WebSocket (VibeVoice-Realtime demo)
 
+## Screenshots
+
+The web UI covers speech generation, voice management, music, podcasts, and audio tools. Images live in `docs/screenshots/`.
+
+### Generate speech
+
+Enter text, pick speakers or custom voices, and generate audio via `POST /api/v1/speech/generate`.
+
+![Generate speech](docs/screenshots/AudioMesh-GenerateSpeech.png)
+
+### Create voice
+
+Create custom voices from uploaded audio or clips (`POST /api/v1/voices`, profile and keyword tooling on the Voices page).
+
+![Create voice](docs/screenshots/AudioMesh-CreateVoice.png)
+
+### Music
+
+ACE-Step music generation with prompts, lyrics assistance, presets, and history (`/api/v1/music/*`).
+
+![Music generation](docs/screenshots/AudioMesh-Music.png)
+
+### Podcast
+
+Generate scripts from URLs and produce multi-voice podcast audio; browse the podcast library (`/api/v1/podcast/*`, `/api/v1/podcasts`).
+
+![Podcast](docs/screenshots/AudioMesh-Podcast.png)
+
+### Ad Scanner
+
+Upload podcast audio to detect ad segments, then export a clean MP3 or ads-only cut (`/api/v1/audio-tools/podcast/scan-ads` and related endpoints).
+
+![Ad Scanner](docs/screenshots/AudioMesh-AdScanner.png)
+
 ## Prerequisites
 
 - Python 3.8 or higher (3.12 recommended for Qwen3-TTS)
@@ -92,7 +126,8 @@ AudioMesh/
 ├── scripts/
 │   └── setup_vibevoice.py   # Setup script
 ├── docs/
-│   └── SETUP.md             # Detailed setup guide
+│   ├── SETUP.md             # Detailed setup guide
+│   └── screenshots/         # Web UI screenshots (README)
 ├── outputs/                  # Generated audio files
 ├── models/                   # Downloaded models
 └── VibeVoice/               # Cloned upstream VibeVoice repository (legacy backend)
