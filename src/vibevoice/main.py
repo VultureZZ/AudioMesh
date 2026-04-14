@@ -10,7 +10,9 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from .config import config
 from .middleware.auth import APIKeyAuthMiddleware
+from .middleware.idle_activity import IdleActivityMiddleware
 from .middleware.rate_limit import RateLimitMiddleware
+from .idle_memory import idle_memory_watchdog
 from .routes import speech, voices, podcasts, transcripts, music, settings
 from .routes import realtime_speech
 from .routers import audio_tools
@@ -68,6 +70,11 @@ logger.info(f"  Realtime port: {config.REALTIME_PORT}")
 logger.info(f"  Realtime model: {config.REALTIME_MODEL_ID}")
 logger.info(f"  Realtime device: {config.REALTIME_DEVICE}")
 logger.info(f"  Realtime repo dir: {config.REALTIME_VIBEVOICE_REPO_DIR}")
+logger.info(
+    "Idle memory purge: %ss after inactivity (poll %ss); set IDLE_MEMORY_PURGE_SECONDS=0 to disable",
+    getattr(config, "IDLE_MEMORY_PURGE_SECONDS", 0),
+    getattr(config, "IDLE_MEMORY_POLL_INTERVAL_SECONDS", 15),
+)
 logger.info("=" * 80)
 
 # Add CORS middleware (allow all origins for development)
@@ -84,6 +91,9 @@ app.add_middleware(APIKeyAuthMiddleware)
 
 # Add rate limiting middleware
 app.add_middleware(RateLimitMiddleware)
+
+# Idle memory: last middleware added runs first on each request
+app.add_middleware(IdleActivityMiddleware)
 
 # Register routes
 app.include_router(speech.router)
@@ -105,6 +115,9 @@ async def _shutdown() -> None:
     cleanup_task = getattr(app.state, "transcript_cleanup_task", None)
     if cleanup_task:
         cleanup_task.cancel()
+    idle_task = getattr(app.state, "idle_memory_task", None)
+    if idle_task:
+        idle_task.cancel()
 
 
 async def _transcript_cleanup_loop() -> None:
@@ -121,6 +134,10 @@ async def _transcript_cleanup_loop() -> None:
 @app.on_event("startup")
 async def _startup() -> None:
     app.state.transcript_cleanup_task = asyncio.create_task(_transcript_cleanup_loop())
+    if getattr(config, "IDLE_MEMORY_PURGE_SECONDS", 0) > 0:
+        app.state.idle_memory_task = asyncio.create_task(idle_memory_watchdog())
+    else:
+        app.state.idle_memory_task = None
 
 
 @app.get("/health")

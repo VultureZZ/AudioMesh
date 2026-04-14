@@ -210,6 +210,10 @@ class Qwen3Backend(TTSBackend):
         self._unload_timer.daemon = True
         self._unload_timer.start()
 
+    def has_inflight_generation(self) -> bool:
+        with self._lock:
+            return self._inflight_generations > 0
+
     def unload_models_immediately(self) -> None:
         """
         Unload all loaded models without waiting for the idle timer (e.g. before ACE-Step

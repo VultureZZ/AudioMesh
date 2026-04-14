@@ -8,10 +8,12 @@ Model name comes from TRANSCRIPT_WHISPER_MODEL (same as transcript settings).
 
 from __future__ import annotations
 
+import gc
 import logging
 from typing import Any, Optional
 
 from ..config import config
+from ..gpu_memory import release_torch_cuda_memory
 
 logger = logging.getLogger(__name__)
 
@@ -68,3 +70,13 @@ def transcribe_for_ad_scan(audio_path: str, language: Optional[str] = None) -> d
         )
     detected = getattr(info, "language", None)
     return {"segments": out_segments, "language": detected}
+
+
+def unload_model() -> None:
+    """Drop the lazy-loaded faster-whisper model and release CUDA cache."""
+    global _model
+    if _model is None:
+        return
+    _model = None
+    gc.collect()
+    release_torch_cuda_memory()

@@ -283,6 +283,9 @@ class SpeakerIsolationService:
         self._jobs: dict[str, dict[str, Any]] = {}
         self._tasks: dict[str, asyncio.Task[None]] = {}
 
+    def has_running_tasks(self) -> bool:
+        return bool(self._tasks)
+
     @staticmethod
     def _require_hf_token() -> None:
         if not (config.HF_TOKEN or "").strip():

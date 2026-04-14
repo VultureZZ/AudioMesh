@@ -25,6 +25,10 @@ class TranscriptService:
         self._jobs: dict[str, asyncio.Task[None]] = {}
         self._processor_mode = (config.TRANSCRIPT_PROCESSOR_MODE or "subprocess").strip().lower()
 
+    def has_active_jobs(self) -> bool:
+        """True while a transcript upload or analysis task is running."""
+        return bool(self._jobs)
+
     @staticmethod
     def _ext_from_filename(filename: str) -> str:
         return (Path(filename).suffix or "").lower().lstrip(".")

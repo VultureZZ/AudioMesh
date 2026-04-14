@@ -54,6 +54,16 @@ class Config:
     QWEN_TTS_DTYPE: str = os.getenv("QWEN_TTS_DTYPE", "bfloat16")
     # Seconds of idle time after which TTS models are unloaded to free memory. 0 = never unload.
     TTS_MODEL_IDLE_UNLOAD_SECONDS: int = int(os.getenv("TTS_MODEL_IDLE_UNLOAD_SECONDS", "15"))
+    # After this many seconds with no API activity (see idle activity middleware), unload
+    # WhisperX, pyannote, Qwen3-TTS, ad-scan Whisper, and release CUDA / heap. 0 = disabled.
+    IDLE_MEMORY_PURGE_SECONDS: int = int(os.getenv("IDLE_MEMORY_PURGE_SECONDS", "60"))
+    IDLE_MEMORY_POLL_INTERVAL_SECONDS: float = float(os.getenv("IDLE_MEMORY_POLL_INTERVAL_SECONDS", "15"))
+    IDLE_MEMORY_TRIM_HEAP: bool = os.getenv("IDLE_MEMORY_TRIM_HEAP", "true").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
 
     # Legacy VibeVoice (when TTS_BACKEND=vibevoice)
     MODEL_PATH: Path = Path(os.getenv("MODEL_PATH", "models/VibeVoice-1.5B"))

@@ -263,6 +263,16 @@ class VoiceGenerator:
 
         return "\n".join(formatted_lines)
 
+    def tts_has_inflight_generation(self) -> bool:
+        """True while Qwen3-TTS (or another backend) is inside generate()."""
+        if self._use_legacy:
+            return False
+        backend = self._backend
+        if backend is None:
+            return False
+        check = getattr(backend, "has_inflight_generation", None)
+        return bool(callable(check) and check())
+
     def release_gpu_memory_after_speech(self) -> None:
         """
         Unload in-process TTS weights and release CUDA caches so another workload (e.g.

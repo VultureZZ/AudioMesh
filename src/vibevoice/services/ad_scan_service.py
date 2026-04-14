@@ -83,6 +83,9 @@ class AdScanService:
         self._jobs: dict[str, dict[str, Any]] = {}
         self._tasks: dict[str, asyncio.Task[None]] = {}
 
+    def has_running_tasks(self) -> bool:
+        return bool(self._tasks)
+
     def _job_dir(self, job_id: str) -> Path:
         return config.AUDIO_TOOLS_DIR / "jobs" / job_id
 
