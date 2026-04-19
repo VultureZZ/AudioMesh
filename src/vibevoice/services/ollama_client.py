@@ -65,6 +65,7 @@ def _sanitize_profile_for_prompt(profile: Dict) -> Dict:
 
 _CUE_MARKER_BRACKET = re.compile(r"^\s*\[CUE:", re.IGNORECASE)
 _INLINE_PRODUCTION_CUE = re.compile(r"\s*\[CUE:\s*[^\]]+\]\s*", re.IGNORECASE)
+_SPEAKER_LINE_CANONICAL = re.compile(r"^\s*Speaker\s*(\d+)\s*:\s*", re.IGNORECASE)
 
 
 def _remove_placeholder_brackets(script: str) -> str:
@@ -77,6 +78,65 @@ def _remove_placeholder_brackets(script: str) -> str:
         return ""
 
     return re.sub(r"\s*\[([^\]]+)\]", repl, script)
+
+
+def normalize_podcast_speaker_labels(
+    script: str,
+    num_voices: int,
+    *,
+    include_production_cues: bool = False,
+) -> str:
+    """
+    Rewrite ``Name:`` dialogue prefixes to ``Speaker 1:`` … ``Speaker N:`` in order of first appearance.
+
+    TTS maps ``Speaker i`` to ``voices[i-1]``; persona or celebrity names in the margin break that mapping.
+    """
+    if num_voices < 1:
+        return script
+    lines = script.split("\n")
+    label_to_index: Dict[str, int] = {}
+    next_slot = 1
+    out: List[str] = []
+
+    for line in lines:
+        s = line.strip()
+        if not s:
+            continue
+
+        if include_production_cues and _CUE_MARKER_BRACKET.match(s):
+            out.append(s)
+            continue
+
+        m = _SPEAKER_LINE_CANONICAL.match(s)
+        if m:
+            n = int(m.group(1))
+            body = s[m.end() :].strip()
+            n = max(1, min(n, num_voices))
+            out.append(f"Speaker {n}: {body}".strip())
+            continue
+
+        if ":" not in s:
+            out.append(s)
+            continue
+
+        prefix, _, rest = s.partition(":")
+        prefix = prefix.strip()
+        rest = rest.lstrip()
+        if not prefix:
+            out.append(s)
+            continue
+
+        key = prefix.casefold()
+        if key not in label_to_index:
+            if next_slot <= num_voices:
+                label_to_index[key] = next_slot
+                next_slot += 1
+            else:
+                label_to_index[key] = num_voices
+        sn = label_to_index[key]
+        out.append(f"Speaker {sn}: {rest}".strip())
+
+    return "\n".join(out)
 
 
 def _join_unique_phrases(phrases: List[str], max_chars: int = 600) -> str:
@@ -1089,7 +1149,8 @@ Use ONLY this format. No markdown, no stage directions in prose, no header label
 
 {chr(10).join(speaker_examples)}
 
-Each speaker turn must be on its own line, prefixed with the speaker label and a colon.
+Each speaker turn must be on its own line, prefixed with exactly ``Speaker 1:``, ``Speaker 2:``, … ``Speaker {num_voices}:`` (the word Speaker, a space, the digit, then a colon).
+Do not use real names, persona names, celebrity names, voice library names, or role labels (Host/Guest/Anchor) as line prefixes — those may appear inside the spoken line when citing people or sources.
 Blank lines between speaker turns only — no other blank lines.
 Do NOT include stage directions, scene headers, act labels, or any non-dialogue text.{script_format_cue_rule}
 
@@ -1135,14 +1196,14 @@ Do NOT include stage directions, scene headers, act labels, or any non-dialogue 
 --- DO NOT ---
 - Do not write "(pause)" or "(beat)" — build pauses into sentence structure with em dashes and ellipses
 - Do not write sound effect instructions
-- Do not add "Host:", "Guest:", or role labels — use only the speaker name/label
+- Do not prefix lines with names or roles — only ``Speaker 1:`` through ``Speaker {num_voices}:`` (matching the VOICE PROFILES order by speaker number, not by display name)
 {do_not_spoken_line}- Do not repeat the episode title or date mid-script
 - Do not let any story segment exceed {max_segment_words} words without a speaker exchange
 
 --- QUALITY CHECK (apply before outputting) ---
 Read the first and last line of your script. The first must contain a hook. The last must be a complete, resolved statement — not a trailing question.
 Scan for any sentence over 30 words and break it.
-Confirm {num_voices} distinct voices are present with roughly balanced turns.
+Confirm {num_voices} distinct Speaker labels (Speaker 1..{num_voices}) are present with roughly balanced turns.
 
 Generate the complete podcast script now:"""
 
@@ -1204,6 +1265,9 @@ Generate the complete podcast script now:"""
 
         # Clean up any extra whitespace that might have been left after removing placeholders
         cleaned_script = "\n".join(cleaned_lines)
+        cleaned_script = normalize_podcast_speaker_labels(
+            cleaned_script, num_voices, include_production_cues=include_production_cues
+        )
         # Remove multiple spaces and clean up spacing around punctuation
         cleaned_script = re.sub(r' +', ' ', cleaned_script)
         cleaned_script = re.sub(r' \.', '.', cleaned_script)

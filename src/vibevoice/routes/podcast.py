@@ -230,6 +230,14 @@ async def _run_production_task(task_id: str, request: PodcastProductionRequest) 
     )
 
     try:
+        from vibevoice.services.ollama_client import normalize_podcast_speaker_labels
+
+        script_for_pipeline = normalize_podcast_speaker_labels(
+            (request.script or "").strip(),
+            len(request.voices),
+            include_production_cues="[CUE:" in (request.script or "").upper(),
+        )
+
         stage_progress["generating_script"] = "running"
         _set_production_task(
             task_id,
@@ -242,7 +250,7 @@ async def _run_production_task(task_id: str, request: PodcastProductionRequest) 
 
         def _segment_script() -> List[Dict]:
             return podcast_generator.generate_script_segments(
-                request.script,
+                script_for_pipeline,
                 request.ollama_url,
                 request.ollama_model,
                 num_voices=len(request.voices),
@@ -262,7 +270,7 @@ async def _run_production_task(task_id: str, request: PodcastProductionRequest) 
         )
 
         stage_progress["generating_voice_track"] = "running"
-        tts_script = strip_production_cue_markers(request.script)
+        tts_script = strip_production_cue_markers(script_for_pipeline)
         genre_label = (request.genre or "").strip() or production_style_to_genre_style(request.style) or "General"
 
         prosody_plan = None
@@ -298,7 +306,7 @@ async def _run_production_task(task_id: str, request: PodcastProductionRequest) 
             generation_queue = GenerationQueue(library, genre_template=genre_template)
             try:
                 prosody_plan = await director_for_mix.plan(
-                    request.script,
+                    script_for_pipeline,
                     script_segments,
                     genre_label,
                     [],
@@ -420,7 +428,7 @@ async def _run_production_task(task_id: str, request: PodcastProductionRequest) 
                 )
 
             production_plan = await director_for_mix.plan(
-                request.script,
+                script_for_pipeline,
                 script_segments,
                 genre_label,
                 [],
@@ -712,7 +720,7 @@ async def _run_production_task(task_id: str, request: PodcastProductionRequest) 
         if request.save_to_library:
             podcast_id, saved_path = _save_podcast_to_library(
                 audio_source_path=output_file,
-                script_text=request.script,
+                script_text=script_for_pipeline,
                 title=request.title,
                 voices=request.voices,
                 source_url=request.source_url,
@@ -1022,16 +1030,24 @@ async def generate_podcast_audio(
     try:
         warnings = voice_manager.get_bgm_risk_warnings(request.voices)
 
+        from vibevoice.services.ollama_client import normalize_podcast_speaker_labels
+
+        script_norm = normalize_podcast_speaker_labels(
+            (request.script or "").strip(),
+            len(request.voices),
+            include_production_cues="[CUE:" in (request.script or "").upper(),
+        )
+
         # Generate audio (TTS/GPU-heavy; must not block the asyncio event loop)
         logger.info("Generating podcast audio...")
         output_path = await asyncio.to_thread(
             podcast_generator.generate_audio,
-            request.script,
+            script_norm,
             request.voices,
         )
         script_segments = await asyncio.to_thread(
             podcast_generator.generate_script_segments,
-            request.script,
+            script_norm,
             genre=request.genre,
             genre_style=request.genre,
             duration=request.duration,
@@ -1051,7 +1067,7 @@ async def generate_podcast_audio(
         if request.save_to_library:
             podcast_id, saved_path = _save_podcast_to_library(
                 audio_source_path=output_file,
-                script_text=request.script,
+                script_text=script_norm,
                 title=request.title,
                 voices=request.voices,
                 source_url=request.source_url,
@@ -1065,7 +1081,7 @@ async def generate_podcast_audio(
             message="Podcast audio generated successfully",
             audio_url=audio_url,
             file_path=str(saved_path),
-            script=request.script,
+            script=script_norm,
             script_segments=script_segments,
             podcast_id=podcast_id,
             warnings=warnings,

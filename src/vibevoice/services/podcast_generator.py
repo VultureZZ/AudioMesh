@@ -9,6 +9,7 @@ from .article_scraper import article_scraper
 from .ollama_client import (
     estimated_duration_seconds_for_segmentation,
     infer_num_voices_from_script,
+    normalize_podcast_speaker_labels,
     ollama_client,
 )
 from .voice_generator import voice_generator
@@ -314,6 +315,8 @@ class PodcastGenerator:
         script = strip_production_cue_markers(script)
         if not script or not script.strip():
             raise ValueError("Script cannot be empty after removing production cue markers")
+
+        script = normalize_podcast_speaker_labels(script, len(voices), include_production_cues=False)
 
         logger.info(f"Generating audio from script: {len(script)} characters, {len(voices)} voices")
 
