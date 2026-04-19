@@ -95,7 +95,7 @@ class Config:
     ACESTEP_HOST: str = os.getenv("ACESTEP_HOST", "127.0.0.1")
     ACESTEP_PORT: int = int(os.getenv("ACESTEP_PORT", "8001"))
     ACESTEP_DEVICE: str = os.getenv("ACESTEP_DEVICE", "cuda")
-    ACESTEP_CONFIG_PATH: str = os.getenv("ACESTEP_CONFIG_PATH", "acestep-v15-turbo")
+    ACESTEP_CONFIG_PATH: str = os.getenv("ACESTEP_CONFIG_PATH", "ACE-Step/acestep-v15-xl-sft")
     ACESTEP_LM_MODEL_PATH: str = os.getenv("ACESTEP_LM_MODEL_PATH", "acestep-5Hz-lm-0.6B")
     ACESTEP_LM_BACKEND: str = os.getenv("ACESTEP_LM_BACKEND", "pt")
     ACESTEP_STARTUP_TIMEOUT_SECONDS: float = float(
@@ -117,6 +117,9 @@ class Config:
     ACESTEP_MIN_MUSIC_DURATION_SECONDS: float = float(os.getenv("ACESTEP_MIN_MUSIC_DURATION_SECONDS", "30"))
     ACESTEP_MIN_TRANSITION_DURATION_SECONDS: float = float(
         os.getenv("ACESTEP_MIN_TRANSITION_DURATION_SECONDS", "10")
+    )
+    ACESTEP_MIN_SFX_DURATION_SECONDS: float = float(
+        os.getenv("ACESTEP_MIN_SFX_DURATION_SECONDS", "4")
     )
     ACESTEP_MAX_MUSIC_DURATION_SECONDS: float = float(os.getenv("ACESTEP_MAX_MUSIC_DURATION_SECONDS", "600"))
 
@@ -159,6 +162,12 @@ class Config:
     BREATH_SFX_PATH: Optional[str] = os.getenv("BREATH_SFX_PATH", None)
     # Stable Audio Open (SFX) — skeleton client; set when integrated.
     STABLE_AUDIO_OPEN_ENABLED: bool = os.getenv("STABLE_AUDIO_OPEN_ENABLED", "false").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+    SFX_FALLBACK_TO_ACESTEP: bool = os.getenv("SFX_FALLBACK_TO_ACESTEP", "true").strip().lower() in {
         "1",
         "true",
         "yes",

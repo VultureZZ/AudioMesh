@@ -339,6 +339,11 @@ export interface AceStepModelCatalogResponse {
   current: Record<string, string>;
 }
 
+/** Response from POST /api/v1/settings/openai/models */
+export interface OpenAIListModelsResponse {
+  models: string[];
+}
+
 export interface MusicPreset {
   id: string;
   name: string;

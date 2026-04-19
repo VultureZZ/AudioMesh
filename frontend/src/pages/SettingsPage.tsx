@@ -2,7 +2,7 @@
  * Settings configuration interface
  */
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { useSettings } from '../hooks/useSettings';
 import { useApi } from '../hooks/useApi';
 import { validateApiEndpoint } from '../utils/validation';
@@ -12,11 +12,36 @@ import { Select } from '../components/Select';
 import { Alert } from '../components/Alert';
 import { SUPPORTED_LANGUAGES } from '../utils/languages';
 import type { PrimaryLlmProvider } from '../types/settings';
+import { apiClient } from '../services/api';
 
 const PRIMARY_LLM_OPTIONS: Array<{ value: PrimaryLlmProvider; label: string }> = [
   { value: 'ollama', label: 'Ollama (local)' },
   { value: 'openai', label: 'ChatGPT (OpenAI API)' },
 ];
+
+const FALLBACK_OPENAI_MODEL_OPTIONS: Array<{ value: string; label: string }> = [
+  { value: 'gpt-4o-mini', label: 'gpt-4o-mini' },
+];
+
+const DEFAULT_ACESTEP_DIT_MODEL = 'ACE-Step/acestep-v15-xl-sft';
+const DEFAULT_ACESTEP_LM_MODEL = 'acestep-5Hz-lm-0.6B';
+
+function openAIModelOptionsFromIds(
+  ids: string[],
+  currentModel: string
+): Array<{ value: string; label: string }> {
+  if (!ids.length) {
+    return currentModel
+      ? [{ value: currentModel, label: `${currentModel} (saved)` }]
+      : FALLBACK_OPENAI_MODEL_OPTIONS;
+  }
+  const set = new Set(ids);
+  const base = ids.map((id) => ({ value: id, label: id }));
+  if (currentModel && !set.has(currentModel)) {
+    return [{ value: currentModel, label: `${currentModel} (saved)` }, ...base];
+  }
+  return base;
+}
 
 export function SettingsPage() {
   const { settings, saveSettings, clearSettings } = useSettings();
@@ -42,6 +67,13 @@ export function SettingsPage() {
   const [openaiModel, setOpenaiModel] = useState(
     settings.openaiModel || 'gpt-4o-mini'
   );
+  const [openaiModelOptions, setOpenaiModelOptions] = useState<
+    Array<{ value: string; label: string }>
+  >(FALLBACK_OPENAI_MODEL_OPTIONS);
+  const [openaiModelsLoading, setOpenaiModelsLoading] = useState(false);
+  const [openaiModelsError, setOpenaiModelsError] = useState<string | null>(null);
+  const openaiModelRef = useRef(openaiModel);
+  openaiModelRef.current = openaiModel;
   const [ollamaServerUrl, setOllamaServerUrl] = useState(
     settings.ollamaServerUrl || 'http://localhost:11434'
   );
@@ -49,17 +81,17 @@ export function SettingsPage() {
     settings.ollamaModel || 'llama3.2'
   );
   const [acestepConfigPath, setAcestepConfigPath] = useState(
-    settings.acestepConfigPath || 'acestep-v15-turbo'
+    settings.acestepConfigPath || DEFAULT_ACESTEP_DIT_MODEL
   );
   const [acestepLmModelPath, setAcestepLmModelPath] = useState(
-    settings.acestepLmModelPath || 'acestep-5Hz-lm-0.6B'
+    settings.acestepLmModelPath || DEFAULT_ACESTEP_LM_MODEL
   );
   const [acestepDitModelOptions, setAcestepDitModelOptions] = useState<
     Array<{ value: string; label: string }>
-  >([{ value: 'acestep-v15-turbo', label: 'acestep-v15-turbo' }]);
+  >([{ value: DEFAULT_ACESTEP_DIT_MODEL, label: DEFAULT_ACESTEP_DIT_MODEL }]);
   const [acestepLmModelOptions, setAcestepLmModelOptions] = useState<
     Array<{ value: string; label: string }>
-  >([{ value: 'acestep-5Hz-lm-0.6B', label: 'acestep-5Hz-lm-0.6B' }]);
+  >([{ value: DEFAULT_ACESTEP_LM_MODEL, label: DEFAULT_ACESTEP_LM_MODEL }]);
 
   const [testStatus, setTestStatus] = useState<
     'idle' | 'testing' | 'success' | 'error'
@@ -80,8 +112,8 @@ export function SettingsPage() {
       settings.ollamaServerUrl || 'http://localhost:11434'
     );
     setOllamaModel(settings.ollamaModel || 'llama3.2');
-    setAcestepConfigPath(settings.acestepConfigPath || 'acestep-v15-turbo');
-    setAcestepLmModelPath(settings.acestepLmModelPath || 'acestep-5Hz-lm-0.6B');
+    setAcestepConfigPath(settings.acestepConfigPath || DEFAULT_ACESTEP_DIT_MODEL);
+    setAcestepLmModelPath(settings.acestepLmModelPath || DEFAULT_ACESTEP_LM_MODEL);
   }, [settings]);
 
   useEffect(() => {
@@ -113,6 +145,51 @@ export function SettingsPage() {
     };
     loadAceStepSettings();
   }, [getAceStepModelCatalog, getAceStepSettings]);
+
+  const loadOpenAIModels = useCallback(async () => {
+    const key = openaiApiKey.trim();
+    if (!key) {
+      setOpenaiModelOptions(FALLBACK_OPENAI_MODEL_OPTIONS);
+      setOpenaiModelsError(null);
+      return;
+    }
+    setOpenaiModelsLoading(true);
+    setOpenaiModelsError(null);
+    try {
+      const res = await apiClient.listOpenAIModels(key);
+      const ids = res.models ?? [];
+      const cur = openaiModelRef.current;
+      setOpenaiModelOptions(openAIModelOptionsFromIds(ids, cur));
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'Failed to load OpenAI models';
+      setOpenaiModelsError(msg);
+    } finally {
+      setOpenaiModelsLoading(false);
+    }
+  }, [openaiApiKey]);
+
+  useEffect(() => {
+    if (primaryLlmProvider !== 'openai') {
+      return undefined;
+    }
+    const key = openaiApiKey.trim();
+    if (!key) {
+      setOpenaiModelOptions(FALLBACK_OPENAI_MODEL_OPTIONS);
+      setOpenaiModelsError(null);
+      return undefined;
+    }
+    const timer = window.setTimeout(() => {
+      void loadOpenAIModels();
+    }, 500);
+    return () => window.clearTimeout(timer);
+  }, [primaryLlmProvider, openaiApiKey, loadOpenAIModels]);
+
+  const openaiModelSelectOptions = useMemo(() => {
+    if (openaiModelOptions.some((o) => o.value === openaiModel)) {
+      return openaiModelOptions;
+    }
+    return [{ value: openaiModel, label: `${openaiModel} (current)` }, ...openaiModelOptions];
+  }, [openaiModelOptions, openaiModel]);
 
   const endpointValidation = validateApiEndpoint(apiEndpoint);
 
@@ -298,13 +375,35 @@ export function SettingsPage() {
                   onChange={(e) => setOpenaiApiKey(e.target.value)}
                   placeholder="sk-..."
                 />
-                <Input
-                  label="OpenAI model"
-                  type="text"
-                  value={openaiModel}
-                  onChange={(e) => setOpenaiModel(e.target.value)}
-                  placeholder="gpt-4o-mini"
-                />
+                <div className="flex flex-col sm:flex-row gap-3 sm:items-end">
+                  <div className="flex-1 min-w-0">
+                    <Select
+                      label="OpenAI model"
+                      options={openaiModelSelectOptions}
+                      value={openaiModel}
+                      onChange={(e) => setOpenaiModel(e.target.value)}
+                    />
+                  </div>
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    onClick={() => void loadOpenAIModels()}
+                    disabled={!openaiApiKey.trim() || openaiModelsLoading}
+                    isLoading={openaiModelsLoading}
+                  >
+                    Refresh models
+                  </Button>
+                </div>
+                {openaiModelsError && (
+                  <p className="text-sm text-red-600">{openaiModelsError}</p>
+                )}
+                {!openaiModelsError && openaiModelsLoading && (
+                  <p className="text-sm text-gray-500">Loading models from OpenAI…</p>
+                )}
+                <p className="text-sm text-gray-600">
+                  The list comes from your OpenAI account (GET /v1/models). Enter an API key above, then pick a
+                  model or use Refresh models.
+                </p>
               </>
             )}
           </div>

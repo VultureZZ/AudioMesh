@@ -21,6 +21,7 @@ class TestEffectiveAcestepDuration(unittest.TestCase):
         mock_cfg.ACESTEP_MIN_MUSIC_DURATION_SECONDS = 30.0
         mock_cfg.ACESTEP_MAX_MUSIC_DURATION_SECONDS = 600.0
         mock_cfg.ACESTEP_MIN_TRANSITION_DURATION_SECONDS = 10.0
+        mock_cfg.ACESTEP_MIN_SFX_DURATION_SECONDS = 4.0
         with patch("vibevoice.config.config", mock_cfg):
             self.assertAlmostEqual(_effective_acestep_duration_seconds(5.0, "music_bed"), 30.0)
             self.assertAlmostEqual(_effective_acestep_duration_seconds(45.0, "music_intro"), 45.0)
@@ -32,8 +33,21 @@ class TestEffectiveAcestepDuration(unittest.TestCase):
         mock_cfg.ACESTEP_MIN_MUSIC_DURATION_SECONDS = 30.0
         mock_cfg.ACESTEP_MAX_MUSIC_DURATION_SECONDS = 600.0
         mock_cfg.ACESTEP_MIN_TRANSITION_DURATION_SECONDS = 10.0
+        mock_cfg.ACESTEP_MIN_SFX_DURATION_SECONDS = 4.0
         with patch("vibevoice.config.config", mock_cfg):
             self.assertAlmostEqual(_effective_acestep_duration_seconds(3.0, "music_transition"), 10.0)
+
+    def test_sfx_uses_short_floor(self):
+        from app.services.generation_queue import _effective_acestep_duration_seconds
+
+        mock_cfg = MagicMock()
+        mock_cfg.ACESTEP_MIN_MUSIC_DURATION_SECONDS = 30.0
+        mock_cfg.ACESTEP_MAX_MUSIC_DURATION_SECONDS = 600.0
+        mock_cfg.ACESTEP_MIN_TRANSITION_DURATION_SECONDS = 10.0
+        mock_cfg.ACESTEP_MIN_SFX_DURATION_SECONDS = 4.0
+        with patch("vibevoice.config.config", mock_cfg):
+            self.assertAlmostEqual(_effective_acestep_duration_seconds(1.2, "sfx_whoosh"), 4.0)
+            self.assertAlmostEqual(_effective_acestep_duration_seconds(2.0, "foley"), 4.0)
 
 
 if __name__ == "__main__":

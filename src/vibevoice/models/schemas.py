@@ -578,6 +578,18 @@ class AceStepModelCatalogResponse(BaseModel):
     current: Dict[str, str] = Field(default_factory=dict, description="Currently effective runtime settings")
 
 
+class OpenAIListModelsRequest(BaseModel):
+    """Request to list OpenAI models available to the user's API key (Chat Completions–capable ids)."""
+
+    openai_api_key: str = Field(..., min_length=1, description="OpenAI API key (Bearer)")
+
+
+class OpenAIListModelsResponse(BaseModel):
+    """Model IDs from OpenAI /v1/models filtered for chat/completions-style use."""
+
+    models: List[str] = Field(default_factory=list, description="Sorted unique model ids")
+
+
 class MusicPresetRequest(BaseModel):
     """Request model for saving/updating a music preset."""
 

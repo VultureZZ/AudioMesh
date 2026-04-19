@@ -51,6 +51,7 @@ import {
   AceStepModelCatalogResponse,
   AceStepRuntimeSettingsRequest,
   AceStepRuntimeSettingsResponse,
+  OpenAIListModelsResponse,
 } from '../types/api';
 import { AppSettings } from '../types/settings';
 
@@ -583,6 +584,16 @@ class ApiClient {
    */
   async getAceStepModelCatalog(): Promise<AceStepModelCatalogResponse> {
     const response = await this.client.get<AceStepModelCatalogResponse>('/api/v1/settings/acestep/models');
+    return response.data;
+  }
+
+  /**
+   * List Chat Completions–capable model IDs from OpenAI for the given API key.
+   */
+  async listOpenAIModels(openaiApiKey: string): Promise<OpenAIListModelsResponse> {
+    const response = await this.client.post<OpenAIListModelsResponse>('/api/v1/settings/openai/models', {
+      openai_api_key: openaiApiKey,
+    });
     return response.data;
   }
 

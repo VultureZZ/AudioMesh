@@ -99,6 +99,24 @@ def _record_production_render(task_id: str, snapshot: Dict[str, Any]) -> None:
     _PRODUCTION_RENDER_HISTORY.appendleft(row)
 
 
+def _normalize_plan_duration_seconds(raw_duration: Any) -> float:
+    """
+    Best-effort normalize ``duration_target_seconds`` from plan payloads.
+
+    Some planner outputs occasionally provide milliseconds in this field.
+    If the value looks implausibly large for a podcast duration, treat it as ms.
+    """
+    try:
+        d = float(raw_duration)
+    except (TypeError, ValueError):
+        return 0.0
+    if d <= 0:
+        return 0.0
+    if d > 7200.0:
+        return d / 1000.0
+    return d
+
+
 def _get_production_render_history(limit: int = 50) -> List[Dict[str, Any]]:
     return list(_PRODUCTION_RENDER_HISTORY)[:limit]
 
@@ -561,10 +579,13 @@ async def _run_production_task(task_id: str, request: PodcastProductionRequest) 
 
                 dialogue_regions = [(int(h["start_ms"]), int(h["end_ms"])) for h in timing_hints]
                 target_lufs = mastering_lufs(genre_template, production_plan.genre)
+                plan_duration_sec = _normalize_plan_duration_seconds(
+                    getattr(production_plan, "duration_target_seconds", None)
+                )
                 qa_pack = run_mix_qa(
                     Path(final_path),
                     target_lufs=target_lufs,
-                    plan_duration_seconds=float(production_plan.duration_target_seconds),
+                    plan_duration_seconds=plan_duration_sec if plan_duration_sec > 0 else None,
                     dialogue_regions_ms=dialogue_regions,
                     plan=production_plan,
                 )
@@ -572,7 +593,7 @@ async def _run_production_task(task_id: str, request: PodcastProductionRequest) 
                     task_id,
                     qa_results=qa_pack,
                     mix_metadata=qa_pack.get("summary"),
-                    plan_duration_seconds=float(production_plan.duration_target_seconds),
+                    plan_duration_seconds=plan_duration_sec if plan_duration_sec > 0 else None,
                     episode_metadata_extra={"mix_qa": json.dumps(qa_pack, default=str)},
                 )
             except Exception as exc:

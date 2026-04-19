@@ -24,17 +24,22 @@ logger = logging.getLogger(__name__)
 
 def _effective_acestep_duration_seconds(requested_seconds: float, category: str) -> float:
     """Clamp ACE-Step request duration: avoid tiny generations; cap at config max."""
+    cat = (category or "").strip()
     try:
         from vibevoice.config import config  # type: ignore
 
         lo = float(getattr(config, "ACESTEP_MIN_MUSIC_DURATION_SECONDS", 30.0))
         hi = float(getattr(config, "ACESTEP_MAX_MUSIC_DURATION_SECONDS", 600.0))
-        if (category or "").strip() == "music_transition":
+        if cat == "music_transition":
             lo = float(getattr(config, "ACESTEP_MIN_TRANSITION_DURATION_SECONDS", 10.0))
+        elif cat.startswith("sfx_") or cat == "foley":
+            lo = float(getattr(config, "ACESTEP_MIN_SFX_DURATION_SECONDS", 4.0))
     except Exception:
         lo, hi = 30.0, 600.0
-        if (category or "").strip() == "music_transition":
+        if cat == "music_transition":
             lo = 10.0
+        elif cat.startswith("sfx_") or cat == "foley":
+            lo = 4.0
     req = float(requested_seconds)
     out = max(lo, min(hi, req))
     if out > req + 1e-3:

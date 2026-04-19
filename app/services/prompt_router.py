@@ -35,12 +35,15 @@ class PromptRouter:
     """Decides which generator handles a library ``category`` string."""
 
     def __init__(self) -> None:
+        self._stable_enabled = False
+        self._sfx_fallback_to_acestep = True
         try:
             from vibevoice.config import config  # type: ignore
 
             self._stable_enabled = bool(config.STABLE_AUDIO_OPEN_ENABLED)
+            self._sfx_fallback_to_acestep = bool(getattr(config, "SFX_FALLBACK_TO_ACESTEP", True))
         except Exception:
-            self._stable_enabled = False
+            pass
 
     def route(self, category: str) -> BackendName:
         c = (category or "").strip()
@@ -49,6 +52,13 @@ class PromptRouter:
         if c in _SFX_CATEGORIES:
             if self._stable_enabled:
                 return "stable_audio"
+            if self._sfx_fallback_to_acestep:
+                logger.warning(
+                    "Stable Audio Open disabled (STABLE_AUDIO_OPEN_ENABLED=false); "
+                    "routing category=%s to ACE-Step fallback",
+                    c,
+                )
+                return "acestep"
             logger.warning(
                 "Stable Audio Open disabled (STABLE_AUDIO_OPEN_ENABLED=false); skipping category=%s",
                 c,
@@ -57,6 +67,9 @@ class PromptRouter:
         if c == "foley":
             if self._stable_enabled:
                 return "stable_audio"
+            if self._sfx_fallback_to_acestep:
+                logger.warning("Stable Audio Open disabled; routing foley generation to ACE-Step fallback")
+                return "acestep"
             logger.warning("Stable Audio Open disabled; skipping foley generation")
             return "skip"
         logger.warning("Unknown category for PromptRouter: %s", c)

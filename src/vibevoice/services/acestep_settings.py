@@ -13,13 +13,19 @@ from ..config import config
 
 # Canonical model IDs aligned with ACE-Step 1.5 docs.
 SUPPORTED_DIT_MODELS: tuple[str, ...] = (
-    "acestep-v15-base",
-    "acestep-v15-sft",
-    "acestep-v15-turbo",
-    "acestep-v15-xl-base",
-    "acestep-v15-xl-sft",
-    "acestep-v15-xl-turbo",
+    "ACE-Step/acestep-v15-base",
+    "ACE-Step/acestep-v15-sft",
+    "ACE-Step/acestep-v15-turbo",
+    "ACE-Step/acestep-v15-xl-base",
+    "ACE-Step/acestep-v15-xl-sft",
+    "ACE-Step/acestep-v15-xl-turbo",
 )
+
+# Backward compatibility: accept bare model ids (e.g. "acestep-v15-xl-sft")
+# and normalize them to canonical Hugging Face ids.
+DIT_MODEL_ALIASES: dict[str, str] = {
+    model_id.split("/", 1)[1]: model_id for model_id in SUPPORTED_DIT_MODELS
+}
 
 SUPPORTED_LM_MODELS: tuple[str, ...] = (
     "acestep-5Hz-lm-0.6B",
@@ -30,6 +36,11 @@ SUPPORTED_LM_MODELS: tuple[str, ...] = (
 
 class AceStepSettingsService:
     """Reads/writes app-level ACE-Step runtime settings."""
+
+    @staticmethod
+    def _normalize_dit_model_id(model_id: str) -> str:
+        normalized = model_id.strip()
+        return DIT_MODEL_ALIASES.get(normalized, normalized)
 
     def __init__(self) -> None:
         self._lock = threading.Lock()
@@ -42,7 +53,8 @@ class AceStepSettingsService:
         }
 
     def _validate(self, *, acestep_config_path: str, acestep_lm_model_path: str) -> None:
-        if acestep_config_path not in SUPPORTED_DIT_MODELS:
+        canonical_dit = self._normalize_dit_model_id(acestep_config_path)
+        if canonical_dit not in SUPPORTED_DIT_MODELS:
             raise ValueError(
                 f"Unsupported ACE-Step DiT model: {acestep_config_path}. "
                 f"Supported models: {', '.join(SUPPORTED_DIT_MODELS)}"
@@ -66,7 +78,9 @@ class AceStepSettingsService:
         defaults = self._default_values()
         with self._lock:
             payload = self._read_raw()
-            acestep_config_path = str(payload.get("acestep_config_path") or defaults["acestep_config_path"]).strip()
+            acestep_config_path = self._normalize_dit_model_id(
+                str(payload.get("acestep_config_path") or defaults["acestep_config_path"]).strip()
+            )
             acestep_lm_model_path = str(
                 payload.get("acestep_lm_model_path") or defaults["acestep_lm_model_path"]
             ).strip()
@@ -83,7 +97,7 @@ class AceStepSettingsService:
         }
 
     def update(self, *, acestep_config_path: str, acestep_lm_model_path: str) -> dict[str, str]:
-        acestep_config_path = acestep_config_path.strip()
+        acestep_config_path = self._normalize_dit_model_id(acestep_config_path.strip())
         acestep_lm_model_path = acestep_lm_model_path.strip()
         self._validate(
             acestep_config_path=acestep_config_path,
