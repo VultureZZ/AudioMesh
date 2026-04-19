@@ -147,6 +147,12 @@ async def run_compare_ab_task(
             )
             plan = await gq.run_queued_and_patch_plan(plan)
             warnings.extend(gq.warnings)
+            try:
+                from app.services.backchannel_resolve import patch_production_plan_voice_backchannels
+
+                plan = patch_production_plan_voice_backchannels(plan, library, voices)
+            except Exception as exc:
+                warnings.append(f"Voice backchannel patch failed: {exc}")
             t_mix = time.perf_counter()
             mp3 = await asyncio.to_thread(
                 audio_compositor.mix_production_plan,

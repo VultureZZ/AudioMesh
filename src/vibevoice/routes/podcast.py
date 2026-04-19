@@ -474,6 +474,14 @@ async def _run_production_task(task_id: str, request: PodcastProductionRequest) 
             except Exception as exc:
                 warnings.append(f"Asset generation queue failed: {exc}")
             warnings.extend(generation_queue.warnings)
+            try:
+                from app.services.backchannel_resolve import patch_production_plan_voice_backchannels
+
+                production_plan = patch_production_plan_voice_backchannels(
+                    production_plan, library, request.voices
+                )
+            except Exception as exc:
+                warnings.append(f"Voice backchannel patch failed: {exc}")
             stage_progress["generating_music_cues"] = "completed"
             try:
                 from app.services.pipeline_log import log_pipeline_event
@@ -528,6 +536,21 @@ async def _run_production_task(task_id: str, request: PodcastProductionRequest) 
                 )
             except Exception:
                 pass
+
+            try:
+                from app.services.production_artifacts import copy_production_cue_review_files
+
+                review_dir = config.OUTPUT_DIR / f"production_{task_id}" / "cue_review"
+                cue_review_files = copy_production_cue_review_files(
+                    review_dir, production_plan, library
+                )
+                _set_production_task(
+                    task_id,
+                    cue_review_dir=str(review_dir.resolve()),
+                    cue_review_files=cue_review_files,
+                )
+            except Exception as exc:
+                warnings.append(f"Cue review copy failed: {exc}")
 
             try:
                 from app.services.genre_templates import mastering_lufs
@@ -667,6 +690,20 @@ async def _run_production_task(task_id: str, request: PodcastProductionRequest) 
                     final_path = await asyncio.to_thread(audio_compositor.mix_podcast, voice_path, cue_placements)
                 except Exception as exc:
                     warnings.append(f"Audio mixing failed; returning voice-only output: {exc}")
+
+            if cue_paths:
+                try:
+                    from app.services.production_artifacts import copy_legacy_cue_paths_review
+
+                    review_dir = config.OUTPUT_DIR / f"production_{task_id}" / "cue_review"
+                    cue_review_files = copy_legacy_cue_paths_review(review_dir, cue_paths)
+                    _set_production_task(
+                        task_id,
+                        cue_review_dir=str(review_dir.resolve()),
+                        cue_review_files=cue_review_files,
+                    )
+                except Exception as exc:
+                    warnings.append(f"Cue review copy failed: {exc}")
 
             stage_progress["mixing_production_audio"] = "completed"
             stage_progress["ready_to_download"] = "completed"
@@ -1204,6 +1241,8 @@ async def get_production_audition_data(task_id: str) -> Dict[str, Any]:
         "file_path": task.get("file_path"),
         "voice_track_path": task.get("voice_track_path"),
         "genre_template_id": task.get("genre_template_id"),
+        "cue_review_dir": task.get("cue_review_dir"),
+        "cue_review_files": task.get("cue_review_files") or [],
         "warnings": task.get("warnings") or [],
     }
 

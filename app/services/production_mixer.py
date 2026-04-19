@@ -425,7 +425,7 @@ class ProductionMixer:
                 region = slice(start, end)
                 mix_slice = ev_samples[:, : end - start]
 
-                if role in ("music_bed", "music_transition"):
+                if role in ("music_bed", "music_transition", "music_intro", "music_outro"):
                     seg_len = mix_slice.shape[1]
                     vad_seg = vad[region]
                     if vad_seg.shape[0] != seg_len:
@@ -648,6 +648,8 @@ def legacy_cues_to_production_plan(
             tr_role = "music_bed"
         elif ct == "outro":
             tr_role = "music_outro"
+        elif ct == "intro":
+            tr_role = "music_intro"
         else:
             tr_role = "music_transition"
         ev = TrackEvent(

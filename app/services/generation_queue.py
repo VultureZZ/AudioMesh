@@ -309,6 +309,8 @@ def _category_from_track_role(track_role: str) -> str:
     mapping = {
         "music_bed": "music_bed",
         "music_transition": "music_transition",
+        "music_intro": "music_intro",
+        "music_outro": "music_outro",
         "sfx_impact": "sfx_impact",
         "sfx_riser": "sfx_riser",
         "sfx_whoosh": "sfx_whoosh",

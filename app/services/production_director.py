@@ -38,6 +38,8 @@ TrackRole = Literal[
     "voice_backchannel",
     "music_bed",
     "music_transition",
+    "music_intro",
+    "music_outro",
     "sfx_impact",
     "sfx_riser",
     "sfx_whoosh",
@@ -45,7 +47,6 @@ TrackRole = Literal[
     "sfx_laugh",
     "sfx_reveal",
     "foley",
-    "voice_backchannel",
 ]
 
 MusicDensity = Literal["low", "medium", "high"]
@@ -788,7 +789,7 @@ OUTPUT SCHEMA (field names exact):
   "tracks": [
     {{
       "track_id": string,
-      "track_role": one of "voice_main"|"voice_backchannel"|"music_bed"|"music_transition"|"sfx_impact"|"sfx_riser"|"sfx_ambience"|"sfx_reveal"|"foley",
+      "track_role": one of "voice_main"|"voice_backchannel"|"music_bed"|"music_transition"|"music_intro"|"music_outro"|"sfx_impact"|"sfx_riser"|"sfx_whoosh"|"sfx_ambience"|"sfx_laugh"|"sfx_reveal"|"foley",
       "events": [
         {{
           "event_id": string,
@@ -936,6 +937,8 @@ DIRECTOR_TOOLS: List[Dict[str, Any]] = [
                             "voice_backchannel",
                             "music_bed",
                             "music_transition",
+                            "music_intro",
+                            "music_outro",
                             "sfx_impact",
                             "sfx_riser",
                             "sfx_whoosh",
