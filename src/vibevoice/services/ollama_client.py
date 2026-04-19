@@ -10,6 +10,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import httpx
 
 from ..config import config
+from .podcast_pause_cues import contextual_pause_ms_for_handoff, redistribute_uniform_pause_markers
 
 logger = logging.getLogger(__name__)
 
@@ -88,13 +89,13 @@ def _inject_speaker_handoff_pauses(
     script: str,
     *,
     include_production_cues: bool = False,
-    default_handoff_ms: int = 220,
 ) -> str:
     """
     Append ``[PAUSE_MS:N]`` at the end of speaker lines when the next speaker line is a different speaker.
 
     Skips lines that already contain a pause marker. Used for LLM-generated scripts so TTS inserts
     silence between turns (see ``strip_inline_pause_markers`` in ``tts/segments.py``).
+    Pause duration is contextual, not a single fixed default.
     """
     from .tts.segments import INLINE_PAUSE_MS_PATTERN
 
@@ -119,6 +120,7 @@ def _inject_speaker_handoff_pauses(
         else:
             entries.append(("other", s))
 
+    handoff_idx = 0
     for i, e in enumerate(entries):
         if e[0] != "spk":
             continue
@@ -132,7 +134,14 @@ def _inject_speaker_handoff_pauses(
             continue
         if INLINE_PAUSE_MS_PATTERN.search(body):
             continue
-        body = f"{body} [PAUSE_MS:{default_handoff_ms}]"
+        ms = contextual_pause_ms_for_handoff(
+            body,
+            handoff_index=handoff_idx,
+            from_speaker=sn,
+            to_speaker=next_sn,
+        )
+        handoff_idx += 1
+        body = f"{body} [PAUSE_MS:{ms}]"
         entries[i] = ("spk", sn, prefix, body)
 
     out: List[str] = []
@@ -1218,7 +1227,7 @@ Use ONLY this format. No markdown, no stage directions in prose, no header label
 Each speaker turn must be on its own line, prefixed with exactly ``Speaker 1:``, ``Speaker 2:``, … ``Speaker {num_voices}:`` (the word Speaker, a space, the digit, then a colon). Never use names, roles, or persona labels as the **prefix** before the colon — only ``Speaker N:``.
 Inside the spoken text after the colon, write **personable, natural dialogue**: co-hosts may address each other by first name or informal reference, react to one another ("yeah, but—", "exactly"), and cite people and organizations from the source material by name. The VOICE PROFILES describe *how* each numbered speaker sounds, not what text must appear at the start of a line.
 Blank lines between speaker turns only — no other blank lines.
-When the next line is a different speaker, end the current line with an inline pause token after the spoken words: ``[PAUSE_MS:220]`` (use roughly 160–400; higher after a direct question or sharp topic change). These tokens are stripped before text-to-speech and become silence between turns — they must never be read as dialogue. If you omit them, the system may insert a default pause at each speaker handoff.
+When the next line is a different speaker, end the current line with exactly one inline pause token after the spoken words: ``[PAUSE_MS:N]`` where **N varies by moment** (allowed range roughly **120–480**). Treat N as performance timing, not decoration: use **shorter** gaps (e.g. 130–200) for quick banter, reactions, or completions; **medium** (200–320) for normal handoffs; **longer** (320–480) after a direct question, a punchline, a heavy fact, or a topic pivot. **Never** use the same N on every line — scan your script and ensure values differ across turns (no copy-pasting one number). These tokens are stripped before text-to-speech and become silence between turns — they must never be read as dialogue. If you omit them, the system may insert contextual pauses at each speaker handoff.
 Do NOT include stage directions, scene headers, act labels, or any non-dialogue text.{script_format_cue_rule}
 
 --- AUDIO WRITING RULES ---
@@ -1237,6 +1246,7 @@ Do NOT include stage directions, scene headers, act labels, or any non-dialogue 
    - Use rhetorical questions sparingly to re-engage listeners at the 1/3 and 2/3 marks
    - Include at least one "moment of weight" per major story: a pause beat where significance lands
    - Lighter, faster exchanges for transitions between stories; slower, more deliberate delivery signals for complex analysis
+   - **Turn gaps:** make ``[PAUSE_MS:N]`` feel musical — alternate tighter and looser beats; match the emotional temperature of the line that just ended (not a metronome).
 
 3. SPEAKER DYNAMICS
    - No speaker should dominate more than 60% of any 2-minute segment
@@ -1272,6 +1282,7 @@ Do NOT include stage directions, scene headers, act labels, or any non-dialogue 
 Read the first and last line of your script. The first must contain a hook. The last must be a complete, resolved statement — not a trailing question.
 Scan for any sentence over 30 words and break it.
 Confirm {num_voices} distinct Speaker labels (Speaker 1..{num_voices}) are present with roughly balanced turns.
+Re-read every ``[PAUSE_MS:N]`` token: values must **not** all be identical — vary N intentionally across the episode.
 
 Generate the complete podcast script now:"""
 
@@ -1347,6 +1358,7 @@ Generate the complete podcast script now:"""
             cleaned_script,
             include_production_cues=include_production_cues,
         )
+        cleaned_script = redistribute_uniform_pause_markers(cleaned_script)
 
         return cleaned_script
 

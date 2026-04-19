@@ -27,7 +27,7 @@ Full pipeline with script segmentation, multi-voice TTS, WhisperX timing alignme
 1. If a URL is provided, `ArticleScraper` fetches and extracts plain text from the article.
 2. Voice profiles are loaded from storage for each named voice. These profiles contain style/tone information built when the voice was created.
 3. `OllamaClient.generate_script()` sends the article text plus voice profiles to a local Ollama LLM (default `llama3.2`). The prompt targets a specific word count derived from the requested duration or `approximate_duration_minutes` field.
-4. The LLM returns a dialogue script in `Speaker N: text` format, with 1-4 speakers. Cleaned output may include inline `[PAUSE_MS:N]` tokens at the end of lines (not spoken); they become silent gaps between turns in the WAV. Post-processing also appends a default `[PAUSE_MS:220]` at each speaker handoff when the model omitted one.
+4. The LLM returns a dialogue script in `Speaker N: text` format, with 1-4 speakers. Cleaned output may include inline `[PAUSE_MS:N]` tokens at the end of lines (not spoken); they become silent gaps between turns in the WAV. Post-processing inserts **contextual** pauses at handoffs when omitted, and replaces **uniform** copy-pasted pause values (same `N` on every line) with varied timings.
 5. When `include_production_cues=true`, the script may also contain `[CUE: ...]` markers; these are stripped before TTS and used only for segmentation.
 
 **Script segmentation** also runs at this stage (or as its own sub-step in production mode). `OllamaClient.generate_script_segments()` asks the LLM to return a structured JSON list of segments, each with a `segment_type`, timing hints, energy level, and notes. Segment types are:
@@ -114,7 +114,7 @@ If ACE-Step is not configured (model not downloaded, or subprocess not started),
 
 **Production Director mode** (`USE_PRODUCTION_DIRECTOR=true`): `GenerationQueue` drives ACE-Step from each track event’s `generation_prompt`. Very short `duration_ms` hints (often a few seconds) are **not** sent as-is: the request length is raised to at least **`ACESTEP_MIN_MUSIC_DURATION_SECONDS`** (default **30** for beds, intros, outros) or **`ACESTEP_MIN_TRANSITION_DURATION_SECONDS`** (default **10** for `music_transition`), then capped by **`ACESTEP_MAX_MUSIC_DURATION_SECONDS`**. After each asset is written to the library, the plan event’s `duration_ms` is updated to the **actual** rendered length so the mixer uses the full file, not the original hint.
 
-**Technologies:** ACE-Step (`acestep-v15-xl-sft` DiT, `acestep-5Hz-lm-0.6B` LM), pydub for format reading, asyncio for polling, CUDA.
+**Technologies:** ACE-Step (`acestep-v15-turbo` DiT, `acestep-5Hz-lm-0.6B` LM), pydub for format reading, asyncio for polling, CUDA.
 
 ---
 
@@ -169,7 +169,7 @@ If `save_to_library=true`:
 | Text-to-speech (default) | Qwen3-TTS 1.7B on CUDA |
 | Text-to-speech (legacy) | VibeVoice 1.5B on CUDA |
 | Timing alignment | WhisperX (`large-v3`) + forced phoneme alignment |
-| Music generation | ACE-Step (`acestep-v15-xl-sft` DiT + `acestep-5Hz-lm-0.6B` LM) |
+| Music generation | ACE-Step (`acestep-v15-turbo` DiT + `acestep-5Hz-lm-0.6B` LM) |
 | Audio composition | pydub (`AudioSegment`) |
 | MP3 encoding | ffmpeg via `ffmpeg-python` |
 | GPU memory management | PyTorch CUDA APIs + custom VRAM polling |
@@ -189,7 +189,7 @@ Key environment variables that affect podcast production:
 | `OLLAMA_MODEL` | `llama3.2` | LLM used for script and segment generation |
 | `DIRECTOR_TIMEOUT_SECONDS` | `240` | Ollama timeout (seconds) per ProductionDirector tool loop or JSON plan attempt |
 | `TRANSCRIPT_WHISPER_MODEL` | `large-v3` | WhisperX model for timing alignment |
-| `ACESTEP_CONFIG_PATH` | `acestep-v15-xl-sft` | ACE-Step DiT model |
+| `ACESTEP_CONFIG_PATH` | `acestep-v15-turbo` | ACE-Step DiT model |
 | `ACESTEP_LM_MODEL_PATH` | `acestep-5Hz-lm-0.6B` | ACE-Step LM model |
 | `ACESTEP_DEVICE` | (auto) | CUDA device index for ACE-Step |
 | `ACESTEP_MIN_FREE_VRAM_MIB` | (config default) | Min free VRAM before ACE-Step starts |
