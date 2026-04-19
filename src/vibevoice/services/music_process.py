@@ -15,7 +15,7 @@ import socket
 import subprocess
 import threading
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Optional
 from urllib.error import URLError
@@ -29,6 +29,36 @@ from ..gpu_memory import (
 )
 
 logger = logging.getLogger(__name__)
+
+_KNOWN_DIT_MODELS = frozenset(
+    {
+        "acestep-v15-base",
+        "acestep-v15-sft",
+        "acestep-v15-turbo",
+        "acestep-v15-xl-base",
+        "acestep-v15-xl-sft",
+        "acestep-v15-xl-turbo",
+    }
+)
+
+
+def _normalize_dit_model_for_api_server(model_id: str) -> str:
+    """
+    Normalize configured DiT model IDs for ACE-Step API startup.
+
+    Some app settings store Hugging Face-style IDs (e.g. ``ACE-Step/acestep-v15-xl-sft``),
+    while the ACE-Step API expects bare model IDs (e.g. ``acestep-v15-xl-sft``).
+    """
+    raw = (model_id or "").strip()
+    candidate = raw.split("/", 1)[1] if "/" in raw else raw
+    if candidate in _KNOWN_DIT_MODELS:
+        return candidate
+    logger.warning(
+        "Unsupported ACE-Step DiT model %r; falling back to %s",
+        raw,
+        "acestep-v15-turbo",
+    )
+    return "acestep-v15-turbo"
 
 
 @dataclass(frozen=True)
@@ -62,7 +92,7 @@ class MusicProcessManager:
             startup_timeout_seconds=config.ACESTEP_STARTUP_TIMEOUT_SECONDS,
             idle_shutdown_seconds=config.ACESTEP_IDLE_SHUTDOWN_SECONDS,
             server_command=config.ACESTEP_SERVER_COMMAND,
-            config_path=runtime_settings["acestep_config_path"],
+            config_path=_normalize_dit_model_for_api_server(runtime_settings["acestep_config_path"]),
             lm_model_path=runtime_settings["acestep_lm_model_path"],
             lm_backend=config.ACESTEP_LM_BACKEND,
             device=config.ACESTEP_DEVICE,
@@ -208,6 +238,7 @@ class MusicProcessManager:
     def ensure_running(self) -> MusicServerConfig:
         """Ensure ACE-Step API server is running and healthy."""
         cfg = self._current_cfg()
+        retried_with_turbo = False
         with self._lock:
             self._start_locked(cfg)
 
@@ -222,6 +253,20 @@ class MusicProcessManager:
                 if self._process and self._process.poll() is not None:
                     code = self._process.returncode
                     self._process = None
+                    if not retried_with_turbo and cfg.config_path != "acestep-v15-turbo":
+                        failed_model = cfg.config_path
+                        retried_with_turbo = True
+                        cfg = replace(cfg, config_path="acestep-v15-turbo")
+                        logger.warning(
+                            "ACE-Step failed to start with model %s (exit code %s); "
+                            "retrying once with fallback model %s",
+                            failed_model,
+                            code,
+                            cfg.config_path,
+                        )
+                        self._start_locked(cfg)
+                        deadline = time.time() + cfg.startup_timeout_seconds
+                        continue
                     raise RuntimeError(
                         f"ACE-Step API process exited early with code {code}. "
                         "Check backend logs for subprocess errors."
