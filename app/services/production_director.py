@@ -19,6 +19,20 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 logger = logging.getLogger(__name__)
 
+
+def _format_director_exc(exc: BaseException, timeout_sec: float) -> str:
+    """Readable message for logs (asyncio.TimeoutError often has an empty or nested repr)."""
+    if isinstance(exc, (asyncio.TimeoutError, TimeoutError)):
+        return (
+            f"timed out after {timeout_sec:g}s waiting for Ollama "
+            f"(increase DIRECTOR_TIMEOUT_SECONDS or use a smaller / faster model)"
+        )
+    s = str(exc).strip()
+    if s:
+        return s
+    return f"{type(exc).__name__}({exc!r})"
+
+
 TrackRole = Literal[
     "voice_main",
     "voice_backchannel",
@@ -472,11 +486,78 @@ def build_fallback_production_plan(
                     event_id=eid,
                     start_ms=start_ms,
                     duration_ms=max(duration_ms, 1),
-                    asset_ref=None,
+                    asset_ref=AssetRef(
+                        generation_prompt=(
+                            f"{genre} podcast underscore — subtle, low volume, "
+                            "neutral newsroom bed, professional broadcast, does not compete with voice"
+                        )
+                    ),
                     volume_db=-14.0,
                     pan=0.0,
+                    fade_in_ms=400,
+                    fade_out_ms=600,
                 )
             )
+
+    if not music_events:
+        for seg in _fallback_segments_from_script(script):
+            st = seg.get("start_time_hint")
+            du = seg.get("duration_hint")
+            try:
+                st_f = float(st or 0.0)
+                du_f = float(du or 0.0)
+            except (TypeError, ValueError):
+                continue
+            start_ms = int(max(0.0, st_f) * 1000)
+            duration_ms = int(max(0.0, du_f) * 1000)
+            seg_type = str(seg.get("segment_type") or "").lower()
+            if seg_type == "dialogue":
+                continue
+            ev += 1
+            eid = f"evt_{ev}"
+            if seg_type == "intro_music":
+                music_events.append(
+                    TrackEvent(
+                        event_id=eid,
+                        start_ms=start_ms,
+                        duration_ms=max(duration_ms, 500),
+                        asset_ref=AssetRef(
+                            generation_prompt=f"{genre} podcast cold open — warm, inviting, NPR-style clarity"
+                        ),
+                        volume_db=-8.0,
+                        pan=0.0,
+                        fade_in_ms=400,
+                        fade_out_ms=800,
+                    )
+                )
+            elif seg_type == "outro_music":
+                music_events.append(
+                    TrackEvent(
+                        event_id=eid,
+                        start_ms=start_ms,
+                        duration_ms=max(duration_ms, 500),
+                        asset_ref=AssetRef(
+                            generation_prompt=f"{genre} episode resolve — gentle cadence, room tone tail"
+                        ),
+                        volume_db=-10.0,
+                        pan=0.0,
+                        fade_in_ms=600,
+                        fade_out_ms=1200,
+                    )
+                )
+            elif seg_type == "transition_sting":
+                sfx_events.append(
+                    TrackEvent(
+                        event_id=eid,
+                        start_ms=start_ms,
+                        duration_ms=max(duration_ms, 200),
+                        asset_ref=AssetRef(generation_prompt="short tonal rise, subtle tape noise, 1–2 seconds"),
+                        volume_db=-6.0,
+                        pan=0.0,
+                        fade_in_ms=10,
+                        fade_out_ms=120,
+                    )
+                )
 
     tracks: List[TimelineTrack] = [
         TimelineTrack(track_id="tr_voice_main", track_role="voice_main", events=voice_events),
@@ -1008,17 +1089,19 @@ class ProductionDirector:
         base_url: Optional[str] = None,
         model: Optional[str] = None,
         *,
-        timeout_seconds: float = 120.0,
+        timeout_seconds: Optional[float] = None,
     ) -> None:
         try:
             from vibevoice.config import config  # type: ignore
 
             self._base_url = base_url or config.OLLAMA_BASE_URL
             self._model = model or config.OLLAMA_MODEL
+            default_t = float(getattr(config, "DIRECTOR_TIMEOUT_SECONDS", 240.0))
         except Exception:
             self._base_url = base_url or "http://127.0.0.1:11434"
             self._model = model or "llama3"
-        self._timeout = timeout_seconds
+            default_t = 240.0
+        self._timeout = float(timeout_seconds) if timeout_seconds is not None else default_t
 
     async def plan(
         self,
@@ -1063,7 +1146,7 @@ class ProductionDirector:
                 ep = plan.episode_id or episode_id
                 return plan.model_copy(update={"episode_id": ep})
             except Exception as exc:
-                _ed = str(exc).strip() or f"{type(exc).__name__}({exc!r})"
+                _ed = _format_director_exc(exc, self._timeout)
                 logger.warning("Director tool loop failed (%s); trying single-shot JSON", _ed)
 
         try:
@@ -1078,7 +1161,7 @@ class ProductionDirector:
             data.setdefault("episode_id", episode_id)
             return ProductionPlan.model_validate(data)
         except Exception as exc:
-            _ed = str(exc).strip() or f"{type(exc).__name__}({exc!r})"
+            _ed = _format_director_exc(exc, self._timeout)
             logger.warning("ProductionDirector falling back to segment-based plan: %s", _ed)
             return build_fallback_production_plan(
                 script=script,

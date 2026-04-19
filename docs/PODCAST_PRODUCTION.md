@@ -184,6 +184,7 @@ Key environment variables that affect podcast production:
 | `TTS_BACKEND` | `qwen3` | `qwen3` or `vibevoice` |
 | `OLLAMA_BASE_URL` | `http://localhost:11434` | Ollama server for script and segmentation |
 | `OLLAMA_MODEL` | `llama3.2` | LLM used for script and segment generation |
+| `DIRECTOR_TIMEOUT_SECONDS` | `240` | Ollama timeout (seconds) per ProductionDirector tool loop or JSON plan attempt |
 | `TRANSCRIPT_WHISPER_MODEL` | `large-v3` | WhisperX model for timing alignment |
 | `ACESTEP_CONFIG_PATH` | `acestep-v15-turbo` | ACE-Step DiT model |
 | `ACESTEP_LM_MODEL_PATH` | `acestep-5Hz-lm-0.6B` | ACE-Step LM model |

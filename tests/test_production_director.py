@@ -170,6 +170,40 @@ class TestFallbackPlan(unittest.TestCase):
         self.assertIn("voice_main", roles)
         self.assertIn("music_bed", roles)
 
+    def test_fallback_dialogue_only_segments_adds_music_from_script_shape(self):
+        """LLM segments often omit intro/outro; supplemental segments must yield mixable music."""
+        script = "Speaker 1: Hello world.\nSpeaker 2: Reply here."
+        segments = [
+            {
+                "segment_type": "dialogue",
+                "speaker": "Speaker 1",
+                "text": "Hello world.",
+                "start_time_hint": 0.0,
+                "duration_hint": 2.0,
+                "energy_level": "medium",
+            },
+            {
+                "segment_type": "dialogue",
+                "speaker": "Speaker 2",
+                "text": "Reply here.",
+                "start_time_hint": 3.0,
+                "duration_hint": 2.0,
+                "energy_level": "medium",
+            },
+        ]
+        plan = build_fallback_production_plan(
+            script=script,
+            script_segments=segments,
+            genre="News",
+            episode_id="fb-dialogue-only",
+            timing_hints=[],
+        )
+        music_tr = next(t for t in plan.tracks if t.track_role == "music_bed")
+        self.assertGreater(len(music_tr.events), 0)
+        for ev in music_tr.events:
+            self.assertIsNotNone(ev.asset_ref)
+            self.assertIsNotNone(ev.asset_ref.generation_prompt)
+
 
 class TestProductionDirectorAsync(unittest.IsolatedAsyncioTestCase):
     async def test_plan_validates_ollama_json(self):

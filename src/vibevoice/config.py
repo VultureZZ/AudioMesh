@@ -128,6 +128,8 @@ class Config:
         "yes",
         "on",
     }
+    # Per-call Ollama timeout for director tool loop and single-shot JSON plan (seconds).
+    DIRECTOR_TIMEOUT_SECONDS: float = float(os.getenv("DIRECTOR_TIMEOUT_SECONDS", "240"))
     # Pre-Whisper Director pass + per-line TTS prosody from ProductionPlan.voice_direction
     VOICE_DIRECTION_ENABLED: bool = os.getenv("VOICE_DIRECTION_ENABLED", "true").strip().lower() in {
         "1",
