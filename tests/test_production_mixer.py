@@ -87,6 +87,20 @@ class TestDuckingEnvelope(unittest.TestCase):
         self.assertLess(mid, 0.99)
         self.assertGreater(mid, duck_lin * 0.5)
 
+    def test_min_duck_linear_floor_with_deep_duck_db(self):
+        """Very deep duck_db must not push music below min_duck_linear during speech."""
+        sr = 48000
+        n = sr
+        vad = np.ones(n, dtype=np.float32)
+        g = build_duck_gain_linear(
+            n,
+            vad,
+            sr=sr,
+            duck_db=-24.0,
+            min_duck_linear=0.4,
+        )
+        self.assertGreaterEqual(float(np.min(g)), 0.39)
+
     def test_lookahead_dips_before_speech_onset(self):
         sr = 48000
         n = 3 * sr

@@ -151,6 +151,10 @@ class Config:
         "yes",
         "on",
     }
+    # Production mixer: music sidechain under speech (energy VAD). Defaults are mild; dense
+    # dialogue otherwise ducks beds to near-silence (-12 dB rel) for the whole episode.
+    PRODUCTION_MUSIC_DUCK_DB: float = float(os.getenv("PRODUCTION_MUSIC_DUCK_DB", "-6"))
+    PRODUCTION_MUSIC_DUCK_MIN_LINEAR: float = float(os.getenv("PRODUCTION_MUSIC_DUCK_MIN_LINEAR", "0.36"))
     # Optional explicit path to a soft breath WAV for inter-line breath inserts (else library search)
     BREATH_SFX_PATH: Optional[str] = os.getenv("BREATH_SFX_PATH", None)
     # Stable Audio Open (SFX) — skeleton client; set when integrated.

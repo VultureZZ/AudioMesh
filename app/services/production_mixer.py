@@ -161,6 +161,7 @@ def build_duck_gain_linear(
     *,
     sr: int,
     duck_db: float = -12.0,
+    min_duck_linear: Optional[float] = None,
     lookahead_ms: float = 800.0,
     attack_ms: float = 300.0,
     release_ms: float = 500.0,
@@ -168,6 +169,10 @@ def build_duck_gain_linear(
     """
     Multiplicative gain (linear 0..1) for music ducking from a speech VAD curve.
     Applies lookahead (max over future window), then exponential attack/release toward duck target.
+
+    ``min_duck_linear``: floor for the ducked target (e.g. 0.35–0.45). Long-form dialogue
+    keeps the energy VAD high most of the time; without a floor, beds can sit ~40 dB under
+    VO and disappear after loudness normalization.
     """
     assert vad_speech.shape[0] == n_samples
     look = int(lookahead_ms * sr / 1000.0)
@@ -179,7 +184,9 @@ def build_duck_gain_linear(
             j1 = min(n_samples, i + look + 1)
             future_max[i] = float(np.max(vad_speech[i:j1]))
     target_lin = np.ones(n_samples, dtype=np.float64)
-    duck_lin = 10.0 ** (duck_db / 20.0)
+    duck_lin = float(10.0 ** (duck_db / 20.0))
+    if min_duck_linear is not None and float(min_duck_linear) > 0.0:
+        duck_lin = max(duck_lin, float(min_duck_linear))
     target_lin = np.where(future_max > 0.5, duck_lin, 1.0)
 
     att = np.exp(-1.0 / max(1.0, attack_ms * sr / 1000.0))
@@ -373,6 +380,18 @@ class ProductionMixer:
         master = np.zeros((2, total_samps), dtype=np.float32)
         master[:, : min(n_samp, total_samps)] += voice_proc[:, : min(n_samp, total_samps)]
 
+        duck_db = -6.0
+        min_duck_lin: Optional[float] = 0.36
+        try:
+            from vibevoice.config import config as _cfg
+
+            duck_db = float(getattr(_cfg, "PRODUCTION_MUSIC_DUCK_DB", duck_db))
+            min_duck_lin = getattr(_cfg, "PRODUCTION_MUSIC_DUCK_MIN_LINEAR", None)
+            if min_duck_lin is not None:
+                min_duck_lin = float(min_duck_lin)
+        except Exception:
+            pass
+
         overrides = asset_path_overrides or {}
 
         for tr in plan.tracks:
@@ -434,7 +453,13 @@ class ProductionMixer:
                             np.linspace(0, 1, vad_seg.shape[0]),
                             vad_seg.astype(np.float64),
                         ).astype(np.float32)
-                    duck = build_duck_gain_linear(seg_len, vad_seg, sr=sr)
+                    duck = build_duck_gain_linear(
+                        seg_len,
+                        vad_seg,
+                        sr=sr,
+                        duck_db=duck_db,
+                        min_duck_linear=min_duck_lin,
+                    )
                     mix_slice = mix_slice * duck[np.newaxis, :]
 
                 master[:, region] += mix_slice
