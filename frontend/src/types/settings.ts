@@ -33,6 +33,6 @@ export const DEFAULT_SETTINGS: AppSettings = {
   openaiModel: 'gpt-4o-mini',
   ollamaServerUrl: 'http://localhost:11434',
   ollamaModel: 'llama3.2',
-  acestepConfigPath: 'ACE-Step/acestep-v15-xl-sft',
+  acestepConfigPath: 'acestep-v15-xl-sft',
   acestepLmModelPath: 'acestep-5Hz-lm-0.6B',
 };

@@ -95,7 +95,7 @@ class Config:
     ACESTEP_HOST: str = os.getenv("ACESTEP_HOST", "127.0.0.1")
     ACESTEP_PORT: int = int(os.getenv("ACESTEP_PORT", "8001"))
     ACESTEP_DEVICE: str = os.getenv("ACESTEP_DEVICE", "cuda")
-    ACESTEP_CONFIG_PATH: str = os.getenv("ACESTEP_CONFIG_PATH", "acestep-v15-turbo")
+    ACESTEP_CONFIG_PATH: str = os.getenv("ACESTEP_CONFIG_PATH", "acestep-v15-xl-sft")
     ACESTEP_LM_MODEL_PATH: str = os.getenv("ACESTEP_LM_MODEL_PATH", "acestep-5Hz-lm-0.6B")
     ACESTEP_LM_BACKEND: str = os.getenv("ACESTEP_LM_BACKEND", "pt")
     ACESTEP_STARTUP_TIMEOUT_SECONDS: float = float(

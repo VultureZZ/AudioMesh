@@ -140,7 +140,7 @@ AudioMesh/
 | **TTS (default)** | Qwen3-TTS: `Qwen/Qwen3-TTS-12Hz-1.7B-Base`, `Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice`, `Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign` (`QWEN_TTS_*`). |
 | **TTS (legacy)** | VibeVoice: `microsoft/VibeVoice-1.5B` (`TTS_BACKEND=vibevoice`, `MODEL_PATH`, `VIBEVOICE_REPO_DIR`). |
 | **Realtime TTS** | `microsoft/VibeVoice-Realtime-0.5B` (`REALTIME_VIBEVOICE_REPO_DIR`, `REALTIME_MODEL_ID`). |
-| **Music** | ACE-Step runtime (`ACESTEP_CONFIG_PATH=ACE-Step/acestep-v15-xl-sft`, `ACESTEP_LM_MODEL_PATH=acestep-5Hz-lm-0.6B`). Optional Ollama prompt refinement (`OLLAMA_*`, default `llama3.2`). Model defaults come from `.env`, and runtime selection can be changed in Settings. |
+| **Music** | ACE-Step runtime (`ACESTEP_CONFIG_PATH=acestep-v15-xl-sft`, `ACESTEP_LM_MODEL_PATH=acestep-5Hz-lm-0.6B`). Optional Ollama prompt refinement (`OLLAMA_*`, default `llama3.2`). Model defaults come from `.env`, and runtime selection can be changed in Settings. |
 | **Transcripts** | Whisper (`TRANSCRIPT_WHISPER_MODEL`, default `large-v3`) with speaker analysis tooling, plus configurable LLM analysis (`LLM_PROVIDER`, `LLM_MODEL`). |
 | **Podcast / lyrics** | Ollama for podcast script and lyric/caption assistance (`OLLAMA_BASE_URL`, `OLLAMA_MODEL`). |
 | **Voice profiles** | Ollama-assisted profile analysis and keyword enrichment (`OLLAMA_*`). |

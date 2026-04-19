@@ -256,6 +256,13 @@ async def _run_production_task(task_id: str, request: PodcastProductionRequest) 
             include_production_cues="[CUE:" in (request.script or "").upper(),
         )
 
+        llm_is_openai = (request.llm_provider or "ollama").strip().lower() == "openai"
+        if llm_is_openai and getattr(config, "USE_PRODUCTION_DIRECTOR", False):
+            warnings.append(
+                "Primary LLM is OpenAI: Ollama-based Production Director is skipped; "
+                "using heuristic voice direction and simplified production mixing."
+            )
+
         stage_progress["generating_script"] = "running"
         _set_production_task(
             task_id,
@@ -299,7 +306,11 @@ async def _run_production_task(task_id: str, request: PodcastProductionRequest) 
         director_for_mix = None
         library = None
 
-        if getattr(config, "VOICE_DIRECTION_ENABLED", True) and config.USE_PRODUCTION_DIRECTOR:
+        if (
+            getattr(config, "VOICE_DIRECTION_ENABLED", True)
+            and config.USE_PRODUCTION_DIRECTOR
+            and not llm_is_openai
+        ):
             from app.services.asset_library import AssetLibrary
             from app.services.generation_queue import GenerationQueue
             from app.services.production_director import ProductionDirector
@@ -416,7 +427,7 @@ async def _run_production_task(task_id: str, request: PodcastProductionRequest) 
             genre_template_id=genre_template.genre_id,
         )
 
-        use_director = config.USE_PRODUCTION_DIRECTOR
+        use_director = config.USE_PRODUCTION_DIRECTOR and not llm_is_openai
         qa_pack: Optional[Dict[str, Any]] = None
 
         if use_director:

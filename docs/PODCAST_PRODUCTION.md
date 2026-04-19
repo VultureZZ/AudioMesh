@@ -113,7 +113,7 @@ If ACE-Step is not configured (model not downloaded, or subprocess not started),
 
 **Production Director mode** (`USE_PRODUCTION_DIRECTOR=true`): `GenerationQueue` drives ACE-Step from each track event’s `generation_prompt`. Very short `duration_ms` hints (often a few seconds) are **not** sent as-is: the request length is raised to at least **`ACESTEP_MIN_MUSIC_DURATION_SECONDS`** (default **30** for beds, intros, outros) or **`ACESTEP_MIN_TRANSITION_DURATION_SECONDS`** (default **10** for `music_transition`), then capped by **`ACESTEP_MAX_MUSIC_DURATION_SECONDS`**. After each asset is written to the library, the plan event’s `duration_ms` is updated to the **actual** rendered length so the mixer uses the full file, not the original hint.
 
-**Technologies:** ACE-Step (`ACE-Step/acestep-v15-xl-sft` DiT, `acestep-5Hz-lm-0.6B` LM), pydub for format reading, asyncio for polling, CUDA.
+**Technologies:** ACE-Step (`acestep-v15-xl-sft` DiT, `acestep-5Hz-lm-0.6B` LM), pydub for format reading, asyncio for polling, CUDA.
 
 ---
 
@@ -168,7 +168,7 @@ If `save_to_library=true`:
 | Text-to-speech (default) | Qwen3-TTS 1.7B on CUDA |
 | Text-to-speech (legacy) | VibeVoice 1.5B on CUDA |
 | Timing alignment | WhisperX (`large-v3`) + forced phoneme alignment |
-| Music generation | ACE-Step (`ACE-Step/acestep-v15-xl-sft` DiT + `acestep-5Hz-lm-0.6B` LM) |
+| Music generation | ACE-Step (`acestep-v15-xl-sft` DiT + `acestep-5Hz-lm-0.6B` LM) |
 | Audio composition | pydub (`AudioSegment`) |
 | MP3 encoding | ffmpeg via `ffmpeg-python` |
 | GPU memory management | PyTorch CUDA APIs + custom VRAM polling |
@@ -188,7 +188,7 @@ Key environment variables that affect podcast production:
 | `OLLAMA_MODEL` | `llama3.2` | LLM used for script and segment generation |
 | `DIRECTOR_TIMEOUT_SECONDS` | `240` | Ollama timeout (seconds) per ProductionDirector tool loop or JSON plan attempt |
 | `TRANSCRIPT_WHISPER_MODEL` | `large-v3` | WhisperX model for timing alignment |
-| `ACESTEP_CONFIG_PATH` | `ACE-Step/acestep-v15-xl-sft` | ACE-Step DiT model |
+| `ACESTEP_CONFIG_PATH` | `acestep-v15-xl-sft` | ACE-Step DiT model |
 | `ACESTEP_LM_MODEL_PATH` | `acestep-5Hz-lm-0.6B` | ACE-Step LM model |
 | `ACESTEP_DEVICE` | (auto) | CUDA device index for ACE-Step |
 | `ACESTEP_MIN_FREE_VRAM_MIB` | (config default) | Min free VRAM before ACE-Step starts |

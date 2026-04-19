@@ -23,7 +23,7 @@ const FALLBACK_OPENAI_MODEL_OPTIONS: Array<{ value: string; label: string }> = [
   { value: 'gpt-4o-mini', label: 'gpt-4o-mini' },
 ];
 
-const DEFAULT_ACESTEP_DIT_MODEL = 'ACE-Step/acestep-v15-xl-sft';
+const DEFAULT_ACESTEP_DIT_MODEL = 'acestep-v15-xl-sft';
 const DEFAULT_ACESTEP_LM_MODEL = 'acestep-5Hz-lm-0.6B';
 
 function openAIModelOptionsFromIds(

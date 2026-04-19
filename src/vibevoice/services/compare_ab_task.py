@@ -46,6 +46,17 @@ async def run_compare_ab_task(
 
     warnings: List[str] = []
     try:
+        if (llm_provider or "ollama").strip().lower() == "openai":
+            set_status(
+                compare_id,
+                status="failed",
+                error=(
+                    "Genre compare requires the Ollama-based Production Director. "
+                    "Set Primary LLM to Ollama in Settings for this workflow."
+                ),
+            )
+            return
+
         set_status(compare_id, status="running", message="Segmenting script")
         t0 = time.perf_counter()
 

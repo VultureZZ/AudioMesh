@@ -11,20 +11,24 @@ from typing import Any
 
 from ..config import config
 
-# Canonical model IDs aligned with ACE-Step 1.5 docs.
+# Runtime DiT model IDs accepted by ACE-Step API server.
 SUPPORTED_DIT_MODELS: tuple[str, ...] = (
-    "ACE-Step/acestep-v15-base",
-    "ACE-Step/acestep-v15-sft",
-    "ACE-Step/acestep-v15-turbo",
-    "ACE-Step/acestep-v15-xl-base",
-    "ACE-Step/acestep-v15-xl-sft",
-    "ACE-Step/acestep-v15-xl-turbo",
+    "acestep-v15-base",
+    "acestep-v15-sft",
+    "acestep-v15-turbo",
+    "acestep-v15-xl-base",
+    "acestep-v15-xl-sft",
+    "acestep-v15-xl-turbo",
 )
 
-# Backward compatibility: accept bare model ids (e.g. "acestep-v15-xl-sft")
-# and normalize them to canonical Hugging Face ids.
+# Accept Hugging Face style IDs in Settings API/UI, but normalize to runtime IDs.
 DIT_MODEL_ALIASES: dict[str, str] = {
-    model_id.split("/", 1)[1]: model_id for model_id in SUPPORTED_DIT_MODELS
+    "ACE-Step/acestep-v15-base": "acestep-v15-base",
+    "ACE-Step/acestep-v15-sft": "acestep-v15-sft",
+    "ACE-Step/acestep-v15-turbo": "acestep-v15-turbo",
+    "ACE-Step/acestep-v15-xl-base": "acestep-v15-xl-base",
+    "ACE-Step/acestep-v15-xl-sft": "acestep-v15-xl-sft",
+    "ACE-Step/acestep-v15-xl-turbo": "acestep-v15-xl-turbo",
 }
 
 SUPPORTED_LM_MODELS: tuple[str, ...] = (
