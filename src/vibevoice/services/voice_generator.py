@@ -55,12 +55,15 @@ class VoiceGenerator:
             self._backend = _get_tts_backend()
         return self._backend
 
-    def validate_speakers(self, speakers: List[str]) -> None:
+    def validate_speakers(self, speakers: List[str]) -> List[str]:
         """
         Validate that all speakers exist.
 
         Args:
             speakers: List of speaker names (canonical or mapped format)
+
+        Returns:
+            Canonical voice names in request order (same length as ``speakers``).
 
         Raises:
             ValueError: If any speaker is invalid
@@ -85,6 +88,11 @@ class VoiceGenerator:
             raise ValueError(f"Invalid speakers: {', '.join(invalid_speakers)}")
 
         logger.info("Speaker validation passed: %s (normalized: %s)", speakers, normalized_speakers)
+        voice_map = ", ".join(
+            f"Speaker {i + 1}→{normalized_speakers[i]}" for i in range(len(normalized_speakers))
+        )
+        logger.info("  Script Speaker N uses TTS voice: %s", voice_map)
+        return normalized_speakers
 
     def create_transcript_file(self, transcript: str) -> Path:
         """Create a temporary transcript file (used by legacy path)."""
