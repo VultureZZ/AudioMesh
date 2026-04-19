@@ -1063,7 +1063,8 @@ class ProductionDirector:
                 ep = plan.episode_id or episode_id
                 return plan.model_copy(update={"episode_id": ep})
             except Exception as exc:
-                logger.warning("Director tool loop failed (%s); trying single-shot JSON", exc)
+                _ed = str(exc).strip() or f"{type(exc).__name__}({exc!r})"
+                logger.warning("Director tool loop failed (%s); trying single-shot JSON", _ed)
 
         try:
             system = _build_director_system_prompt(genre, genre_template=genre_template)
@@ -1077,7 +1078,8 @@ class ProductionDirector:
             data.setdefault("episode_id", episode_id)
             return ProductionPlan.model_validate(data)
         except Exception as exc:
-            logger.warning("ProductionDirector falling back to segment-based plan: %s", exc)
+            _ed = str(exc).strip() or f"{type(exc).__name__}({exc!r})"
+            logger.warning("ProductionDirector falling back to segment-based plan: %s", _ed)
             return build_fallback_production_plan(
                 script=script,
                 script_segments=script_segments,

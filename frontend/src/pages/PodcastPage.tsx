@@ -521,7 +521,10 @@ export function PodcastPage() {
             <p>
               Stage 2: Generating Voice Track — {productionStageProgress.generating_voice_track || 'pending'}
             </p>
-            <p>Stage 3: Generating Music Cues — {productionStageProgress.generating_music_cues || 'pending'}</p>
+            <p>
+              Stage 3: Generating production stems (music / SFX) —{' '}
+              {productionStageProgress.generating_music_cues || 'pending'}
+            </p>
             {Object.keys(productionCueStatus).length > 0 && (
               <div className="pl-2 text-xs text-gray-600 space-y-1">
                 {Object.entries(productionCueStatus).map(([cue, state]) => (

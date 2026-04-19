@@ -451,6 +451,7 @@ async def _run_production_task(task_id: str, request: PodcastProductionRequest) 
 
             await asyncio.to_thread(_release_tts_and_wait_for_acestep_vram, True)
 
+            stage_progress["generating_music_cues"] = "running"
             _set_production_task(
                 task_id,
                 current_stage="Generating production assets",
@@ -465,6 +466,7 @@ async def _run_production_task(task_id: str, request: PodcastProductionRequest) 
             except Exception as exc:
                 warnings.append(f"Asset generation queue failed: {exc}")
             warnings.extend(generation_queue.warnings)
+            stage_progress["generating_music_cues"] = "completed"
             try:
                 from app.services.pipeline_log import log_pipeline_event
 
@@ -492,7 +494,6 @@ async def _run_production_task(task_id: str, request: PodcastProductionRequest) 
                 stage_progress=stage_progress,
             )
 
-            stage_progress["generating_music_cues"] = "skipped"
             stage_progress["mixing_production_audio"] = "running"
 
             final_path: str | Path = voice_path
@@ -542,7 +543,10 @@ async def _run_production_task(task_id: str, request: PodcastProductionRequest) 
                     episode_metadata_extra={"mix_qa": json.dumps(qa_pack, default=str)},
                 )
             except Exception as exc:
-                warnings.append(f"Mix QA failed: {exc}")
+                err_msg = f"Mix QA failed: {exc}"
+                warnings.append(err_msg)
+                logger.warning("%s", err_msg, exc_info=True)
+                _set_production_task(task_id, mix_qa_error=str(exc))
 
             stage_progress["mixing_production_audio"] = "completed"
             stage_progress["ready_to_download"] = "completed"
@@ -696,7 +700,10 @@ async def _run_production_task(task_id: str, request: PodcastProductionRequest) 
                         episode_metadata_extra={"mix_qa": json.dumps(qa_pack, default=str)},
                     )
                 except Exception as exc:
-                    warnings.append(f"Mix QA failed: {exc}")
+                    err_msg = f"Mix QA failed: {exc}"
+                    warnings.append(err_msg)
+                    logger.warning("%s", err_msg, exc_info=True)
+                    _set_production_task(task_id, mix_qa_error=str(exc))
 
         output_file = Path(final_path)
         podcast_id = None
@@ -730,15 +737,21 @@ async def _run_production_task(task_id: str, request: PodcastProductionRequest) 
         )
         done = _get_production_task(task_id) or {}
         mm = done.get("mix_metadata") if isinstance(done.get("mix_metadata"), dict) else {}
+        qa_summary = done.get("qa_results") if isinstance(done.get("qa_results"), dict) else {}
+        if not mm and isinstance(qa_summary.get("summary"), dict):
+            mm = qa_summary["summary"]
         plan_d = done.get("plan_duration_seconds")
         drift = None
         if plan_d is not None and mm.get("rendered_duration_sec") is not None:
             drift = abs(float(mm["rendered_duration_sec"]) - float(plan_d))
+        qa_pass = mm.get("all_passed")
+        if qa_pass is None and isinstance(qa_summary.get("summary"), dict):
+            qa_pass = qa_summary["summary"].get("all_passed")
         _record_production_render(
             task_id,
             {
                 "created_at": datetime.utcnow().isoformat() + "Z",
-                "qa_all_passed": mm.get("all_passed"),
+                "qa_all_passed": qa_pass,
                 "duration_drift_sec": drift,
                 "audio_url": audio_url,
                 "status": "succeeded",
@@ -750,7 +763,11 @@ async def _run_production_task(task_id: str, request: PodcastProductionRequest) 
             log_pipeline_event(
                 "production_complete",
                 task_id=task_id,
-                extra={"qa_all_passed": mm.get("all_passed"), "duration_drift_sec": drift},
+                extra={
+                    "qa_all_passed": qa_pass,
+                    "duration_drift_sec": drift,
+                    "mix_qa_error": done.get("mix_qa_error"),
+                },
             )
         except Exception:
             pass
@@ -1151,6 +1168,7 @@ async def get_podcast_production_status(task_id: str) -> PodcastProductionStatus
         script_segments=task.get("script_segments") or [],
         warnings=task.get("warnings") or [],
         error=task.get("error"),
+        mix_qa_error=task.get("mix_qa_error"),
     )
 
 

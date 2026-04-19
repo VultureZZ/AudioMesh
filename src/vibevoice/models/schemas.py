@@ -342,6 +342,10 @@ class PodcastProductionStatusResponse(BaseModel):
     script_segments: List[PodcastSegment] = Field(default_factory=list, description="Structured production cue segments")
     warnings: List[str] = Field(default_factory=list, description="Non-fatal warnings encountered during production")
     error: Optional[str] = Field(default=None, description="Failure reason when task fails")
+    mix_qa_error: Optional[str] = Field(
+        default=None,
+        description="Set when post-mix QA threw (mix still completed if present)",
+    )
 
 
 class RegenerateEventRequest(BaseModel):

@@ -197,6 +197,7 @@ export interface PodcastProductionStatusResponse {
   script_segments?: PodcastSegment[];
   warnings?: string[];
   error?: string;
+  mix_qa_error?: string;
 }
 
 export interface PodcastItem {
