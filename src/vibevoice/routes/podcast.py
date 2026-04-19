@@ -495,14 +495,13 @@ async def _run_production_task(task_id: str, request: PodcastProductionRequest) 
                 production_plan_with_prompts=production_plan_with_prompts,
             )
 
+            stage_progress["mixing_production_audio"] = "running"
             _set_production_task(
                 task_id,
                 current_stage="Mixing Production Audio",
                 progress_pct=68,
                 stage_progress=stage_progress,
             )
-
-            stage_progress["mixing_production_audio"] = "running"
 
             final_path: str | Path = voice_path
             t_mix = time.perf_counter()
@@ -621,6 +620,7 @@ async def _run_production_task(task_id: str, request: PodcastProductionRequest) 
                 else:
                     stage_progress["generating_music_cues"] = "skipped"
 
+            stage_progress["mixing_production_audio"] = "running"
             _set_production_task(
                 task_id,
                 current_stage="Mixing Production Audio",
@@ -629,7 +629,6 @@ async def _run_production_task(task_id: str, request: PodcastProductionRequest) 
                 cue_status=cue_status,
             )
 
-            stage_progress["mixing_production_audio"] = "running"
             cue_placements: List[CuePlacement] = []
             for segment in script_segments:
                 if segment.get("segment_type") == "dialogue":

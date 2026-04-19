@@ -22,6 +22,32 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+def _effective_acestep_duration_seconds(requested_seconds: float, category: str) -> float:
+    """Clamp ACE-Step request duration: avoid tiny generations; cap at config max."""
+    try:
+        from vibevoice.config import config  # type: ignore
+
+        lo = float(getattr(config, "ACESTEP_MIN_MUSIC_DURATION_SECONDS", 30.0))
+        hi = float(getattr(config, "ACESTEP_MAX_MUSIC_DURATION_SECONDS", 600.0))
+        if (category or "").strip() == "music_transition":
+            lo = float(getattr(config, "ACESTEP_MIN_TRANSITION_DURATION_SECONDS", 10.0))
+    except Exception:
+        lo, hi = 30.0, 600.0
+        if (category or "").strip() == "music_transition":
+            lo = 10.0
+    req = float(requested_seconds)
+    out = max(lo, min(hi, req))
+    if out > req + 1e-3:
+        logger.info(
+            "ACE-Step duration raised from %.2fs to %.2fs (category=%s, floor=%.2fs)",
+            req,
+            out,
+            category,
+            lo,
+        )
+    return out
+
+
 def _normalize_tag(tag: str) -> str:
     return tag.strip().lower().replace(" ", "_").replace("-", "_")
 
@@ -155,6 +181,11 @@ class GenerationQueue:
                 aid = mapping.get(str(gp).strip())
                 if aid:
                     e["asset_ref"] = {"asset_id": aid}
+                    try:
+                        asset = self.library.get(aid)
+                        e["duration_ms"] = int(asset.duration_ms)
+                    except Exception as exc:
+                        logger.debug("Could not sync event duration from asset %s: %s", aid, exc)
         return ProductionPlanCls.model_validate(raw)
 
     async def generate_for_track_event(
@@ -197,7 +228,7 @@ class GenerationQueue:
         prompt = self.router.apply_genre_prompt_modifiers(
             job.prompt, job.category, self._genre_template
         )
-        duration_s = max(2.0, min(600.0, job.duration_ms / 1000.0))
+        duration_s = _effective_acestep_duration_seconds(job.duration_ms / 1000.0, job.category)
         payload: Dict[str, Any] = {
             "prompt": prompt,
             "instrumental": True,

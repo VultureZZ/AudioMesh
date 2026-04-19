@@ -90,7 +90,7 @@ export function PodcastPage() {
     if (!productionTaskId || !productionTaskStatus) return;
     if (!['queued', 'running'].includes(productionTaskStatus)) return;
 
-    const interval = window.setInterval(async () => {
+    const poll = async () => {
       const status = await getPodcastProductionStatus(productionTaskId);
       if (!status) return;
       setProductionTaskStatus(status.status);
@@ -113,7 +113,10 @@ export function PodcastPage() {
             : 'Production podcast generated successfully!'
         );
       }
-    }, 2500);
+    };
+
+    void poll();
+    const interval = window.setInterval(poll, 2500);
 
     return () => window.clearInterval(interval);
   }, [productionTaskId, productionTaskStatus, getPodcastProductionStatus, settings.apiEndpoint]);
@@ -522,7 +525,7 @@ export function PodcastPage() {
               Stage 2: Generating Voice Track — {productionStageProgress.generating_voice_track || 'pending'}
             </p>
             <p>
-              Stage 3: Generating production stems (music / SFX) —{' '}
+              Stage 3: Generating production assets (music / SFX) —{' '}
               {productionStageProgress.generating_music_cues || 'pending'}
             </p>
             {Object.keys(productionCueStatus).length > 0 && (

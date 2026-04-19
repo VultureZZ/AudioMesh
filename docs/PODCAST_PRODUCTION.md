@@ -111,6 +111,8 @@ For each cue, `PodcastMusicService.generate_cue()`:
 
 If ACE-Step is not configured (model not downloaded, or subprocess not started), this stage is skipped and a warning is added; the final output will be voice-only.
 
+**Production Director mode** (`USE_PRODUCTION_DIRECTOR=true`): `GenerationQueue` drives ACE-Step from each track event’s `generation_prompt`. Very short `duration_ms` hints (often a few seconds) are **not** sent as-is: the request length is raised to at least **`ACESTEP_MIN_MUSIC_DURATION_SECONDS`** (default **30** for beds, intros, outros) or **`ACESTEP_MIN_TRANSITION_DURATION_SECONDS`** (default **10** for `music_transition`), then capped by **`ACESTEP_MAX_MUSIC_DURATION_SECONDS`**. After each asset is written to the library, the plan event’s `duration_ms` is updated to the **actual** rendered length so the mixer uses the full file, not the original hint.
+
 **Technologies:** ACE-Step (`acestep-v15-turbo` DiT, `acestep-5Hz-lm-0.6B` LM), pydub for format reading, asyncio for polling, CUDA.
 
 ---
@@ -190,6 +192,9 @@ Key environment variables that affect podcast production:
 | `ACESTEP_LM_MODEL_PATH` | `acestep-5Hz-lm-0.6B` | ACE-Step LM model |
 | `ACESTEP_DEVICE` | (auto) | CUDA device index for ACE-Step |
 | `ACESTEP_MIN_FREE_VRAM_MIB` | (config default) | Min free VRAM before ACE-Step starts |
+| `ACESTEP_MIN_MUSIC_DURATION_SECONDS` | `30` | Floor (seconds) for ACE-Step renders for beds, intros, outros when the director requests a shorter hint |
+| `ACESTEP_MIN_TRANSITION_DURATION_SECONDS` | `10` | Floor (seconds) for `music_transition` renders |
+| `ACESTEP_MAX_MUSIC_DURATION_SECONDS` | `600` | Cap (seconds) on ACE-Step request duration |
 | `GPU_VRAM_WAIT_TIMEOUT_SECONDS` | (config default) | Max wait for VRAM to free up |
 | `PODCASTS_DIR` | `outputs/podcasts` | Library storage directory |
 | `TRANSCRIPT_PROCESSOR_MODE` | `inline` | `subprocess` isolates transcript deps in `.venv-transcripts` |

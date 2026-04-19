@@ -112,6 +112,13 @@ class Config:
     # Optional explicit command. Example:
     #   ACESTEP_SERVER_COMMAND="uv run acestep-api --host 127.0.0.1 --port 8001"
     ACESTEP_SERVER_COMMAND: Optional[str] = os.getenv("ACESTEP_SERVER_COMMAND", None)
+    # Production pipeline: minimum requested render length for ACE-Step (director / generation queue).
+    # Short clips (e.g. 5s) often sound worse; 30s+ is a common recommendation for musical beds/intros.
+    ACESTEP_MIN_MUSIC_DURATION_SECONDS: float = float(os.getenv("ACESTEP_MIN_MUSIC_DURATION_SECONDS", "30"))
+    ACESTEP_MIN_TRANSITION_DURATION_SECONDS: float = float(
+        os.getenv("ACESTEP_MIN_TRANSITION_DURATION_SECONDS", "10")
+    )
+    ACESTEP_MAX_MUSIC_DURATION_SECONDS: float = float(os.getenv("ACESTEP_MAX_MUSIC_DURATION_SECONDS", "600"))
 
     # Server
     PORT: int = int(os.getenv("PORT", "8000"))
