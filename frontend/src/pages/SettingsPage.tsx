@@ -11,6 +11,12 @@ import { Input } from '../components/Input';
 import { Select } from '../components/Select';
 import { Alert } from '../components/Alert';
 import { SUPPORTED_LANGUAGES } from '../utils/languages';
+import type { PrimaryLlmProvider } from '../types/settings';
+
+const PRIMARY_LLM_OPTIONS: Array<{ value: PrimaryLlmProvider; label: string }> = [
+  { value: 'ollama', label: 'Ollama (local)' },
+  { value: 'openai', label: 'ChatGPT (OpenAI API)' },
+];
 
 export function SettingsPage() {
   const { settings, saveSettings, clearSettings } = useSettings();
@@ -28,6 +34,13 @@ export function SettingsPage() {
   );
   const [defaultSampleRate, setDefaultSampleRate] = useState(
     settings.defaultSampleRate.toString()
+  );
+  const [primaryLlmProvider, setPrimaryLlmProvider] = useState<PrimaryLlmProvider>(
+    settings.primaryLlmProvider ?? 'ollama'
+  );
+  const [openaiApiKey, setOpenaiApiKey] = useState(settings.openaiApiKey || '');
+  const [openaiModel, setOpenaiModel] = useState(
+    settings.openaiModel || 'gpt-4o-mini'
   );
   const [ollamaServerUrl, setOllamaServerUrl] = useState(
     settings.ollamaServerUrl || 'http://localhost:11434'
@@ -60,6 +73,9 @@ export function SettingsPage() {
     setDefaultLanguage(settings.defaultLanguage);
     setDefaultOutputFormat(settings.defaultOutputFormat);
     setDefaultSampleRate(settings.defaultSampleRate.toString());
+    setPrimaryLlmProvider(settings.primaryLlmProvider ?? 'ollama');
+    setOpenaiApiKey(settings.openaiApiKey || '');
+    setOpenaiModel(settings.openaiModel || 'gpt-4o-mini');
     setOllamaServerUrl(
       settings.ollamaServerUrl || 'http://localhost:11434'
     );
@@ -155,6 +171,9 @@ export function SettingsPage() {
       defaultLanguage,
       defaultOutputFormat,
       defaultSampleRate: parseInt(defaultSampleRate),
+      primaryLlmProvider,
+      openaiApiKey: openaiApiKey.trim() || undefined,
+      openaiModel: openaiModel.trim() || undefined,
       ollamaServerUrl: ollamaServerUrl.trim() || undefined,
       ollamaModel: ollamaModel.trim() || undefined,
       acestepConfigPath: acestepConfigPath.trim(),
@@ -254,8 +273,51 @@ export function SettingsPage() {
 
         <div className="border-t pt-6">
           <h2 className="text-xl font-semibold text-gray-900 mb-4">
+            Text generation (LLM)
+          </h2>
+          <p className="text-sm text-gray-600 mb-4">
+            Choose whether podcast script generation and script segmentation use your local Ollama server
+            or the OpenAI API. Production mode still uses Ollama for the Director step; keep the Ollama
+            server below configured and running when using production features.
+          </p>
+          <div className="space-y-4">
+            <Select
+              label="Primary provider"
+              options={PRIMARY_LLM_OPTIONS}
+              value={primaryLlmProvider}
+              onChange={(e) =>
+                setPrimaryLlmProvider(e.target.value as PrimaryLlmProvider)
+              }
+            />
+            {primaryLlmProvider === 'openai' && (
+              <>
+                <Input
+                  label="OpenAI API key"
+                  type="password"
+                  value={openaiApiKey}
+                  onChange={(e) => setOpenaiApiKey(e.target.value)}
+                  placeholder="sk-..."
+                />
+                <Input
+                  label="OpenAI model"
+                  type="text"
+                  value={openaiModel}
+                  onChange={(e) => setOpenaiModel(e.target.value)}
+                  placeholder="gpt-4o-mini"
+                />
+              </>
+            )}
+          </div>
+        </div>
+
+        <div className="border-t pt-6">
+          <h2 className="text-xl font-semibold text-gray-900 mb-4">
             Ollama Configuration
           </h2>
+          <p className="text-sm text-gray-600 mb-4">
+            Used when Primary provider is Ollama, and for Production Director / prosody when production
+            mode is enabled.
+          </p>
 
           <div className="space-y-4">
             <Input

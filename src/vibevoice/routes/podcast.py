@@ -253,6 +253,9 @@ async def _run_production_task(task_id: str, request: PodcastProductionRequest) 
                 script_for_pipeline,
                 request.ollama_url,
                 request.ollama_model,
+                llm_provider=request.llm_provider,
+                openai_api_key=request.openai_api_key,
+                openai_model=request.openai_model,
                 num_voices=len(request.voices),
                 genre=request.genre,
                 genre_style=production_style_to_genre_style(request.style) or request.genre or "General",
@@ -863,10 +866,13 @@ async def generate_podcast_script(
     logger.info(f"Approximate duration (minutes): {request.approximate_duration_minutes}")
     logger.info(f"Voices: {request.voices}")
     logger.info(f"Number of voices: {len(request.voices)}")
+    logger.info(f"LLM provider: {request.llm_provider}")
     if request.ollama_url:
         logger.info(f"Custom Ollama URL: {request.ollama_url}")
     if request.ollama_model:
         logger.info(f"Custom Ollama Model: {request.ollama_model}")
+    if request.openai_model:
+        logger.info(f"OpenAI model: {request.openai_model}")
     logger.info("")
 
     try:
@@ -884,12 +890,18 @@ async def generate_podcast_script(
             request.ollama_model,
             request.approximate_duration_minutes,
             request.include_production_cues,
+            request.llm_provider,
+            request.openai_api_key,
+            request.openai_model,
         )
         script_segments = await asyncio.to_thread(
             podcast_generator.generate_script_segments,
             script,
             ollama_url=request.ollama_url,
             ollama_model=request.ollama_model,
+            llm_provider=request.llm_provider,
+            openai_api_key=request.openai_api_key,
+            openai_model=request.openai_model,
             num_voices=len(request.voices),
             genre=request.genre,
             genre_style=request.genre,
@@ -961,10 +973,13 @@ async def generate_podcast_script_from_article(
     logger.info("Approximate duration (minutes): %s", request.approximate_duration_minutes)
     logger.info("Voices: %s", request.voices)
     logger.info("Narrator speaker index: %s", request.narrator_speaker_index)
+    logger.info("LLM provider: %s", request.llm_provider)
     if request.ollama_url:
         logger.info("Custom Ollama URL: %s", request.ollama_url)
     if request.ollama_model:
         logger.info("Custom Ollama Model: %s", request.ollama_model)
+    if request.openai_model:
+        logger.info("OpenAI model: %s", request.openai_model)
     logger.info("")
 
     try:
@@ -983,12 +998,18 @@ async def generate_podcast_script_from_article(
             request.ollama_model,
             request.approximate_duration_minutes,
             request.include_production_cues,
+            request.llm_provider,
+            request.openai_api_key,
+            request.openai_model,
         )
         script_segments = await asyncio.to_thread(
             podcast_generator.generate_script_segments,
             script,
             ollama_url=request.ollama_url,
             ollama_model=request.ollama_model,
+            llm_provider=request.llm_provider,
+            openai_api_key=request.openai_api_key,
+            openai_model=request.openai_model,
             num_voices=len(request.voices),
             genre=request.genre,
             genre_style=request.genre,
@@ -1381,6 +1402,9 @@ async def post_podcast_compare(request: PodcastCompareRequest) -> PodcastCompare
             genre_b=request.genres[1],
             ollama_url=request.ollama_url,
             ollama_model=request.ollama_model,
+            llm_provider=request.llm_provider,
+            openai_api_key=request.openai_api_key,
+            openai_model=request.openai_model,
             genre_label=genre_label,
             duration=request.duration,
             style=request.style,

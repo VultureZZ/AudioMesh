@@ -162,6 +162,12 @@ class PodcastScriptRequest(PodcastScriptDurationInputs):
     url: str = Field(..., description="URL of the article to convert to podcast")
     voices: List[str] = Field(..., min_length=1, max_length=4, description="List of voice names (1-4 voices)")
     genre: str = Field(..., description="Podcast genre (Comedy, Serious, News, Educational, Storytelling, Interview, Documentary)")
+    llm_provider: Literal["ollama", "openai"] = Field(
+        default="ollama",
+        description="LLM for script generation and segmentation: local Ollama or OpenAI Chat Completions",
+    )
+    openai_api_key: Optional[str] = Field(None, description="OpenAI API key when llm_provider is openai")
+    openai_model: Optional[str] = Field(None, description="OpenAI model id (e.g. gpt-4o-mini) when llm_provider is openai")
     ollama_url: Optional[str] = Field(None, description="Optional custom Ollama server URL")
     ollama_model: Optional[str] = Field(None, description="Optional custom Ollama model name")
     include_production_cues: bool = Field(
@@ -188,6 +194,12 @@ class PodcastArticleScriptRequest(PodcastScriptDurationInputs):
         description="Which speaker is the narrator: 1 = first entry in `voices`, 2 = second, up to the number of voices",
     )
     genre: str = Field(..., description="Podcast genre (Comedy, Serious, News, Educational, Storytelling, Interview, Documentary)")
+    llm_provider: Literal["ollama", "openai"] = Field(
+        default="ollama",
+        description="LLM for script generation and segmentation: local Ollama or OpenAI Chat Completions",
+    )
+    openai_api_key: Optional[str] = Field(None, description="OpenAI API key when llm_provider is openai")
+    openai_model: Optional[str] = Field(None, description="OpenAI model id when llm_provider is openai")
     ollama_url: Optional[str] = Field(None, description="Optional custom Ollama server URL")
     ollama_model: Optional[str] = Field(None, description="Optional custom Ollama model name")
     include_production_cues: bool = Field(
@@ -312,6 +324,12 @@ class PodcastProductionRequest(BaseModel):
         default_factory=lambda: ["intro", "outro", "transitions"],
         description="Enabled cue groups for production mixing",
     )
+    llm_provider: Literal["ollama", "openai"] = Field(
+        default="ollama",
+        description="LLM for script segmentation (Director still uses Ollama)",
+    )
+    openai_api_key: Optional[str] = Field(None, description="OpenAI API key when llm_provider is openai")
+    openai_model: Optional[str] = Field(None, description="OpenAI model id when llm_provider is openai")
     ollama_url: Optional[str] = Field(None, description="Optional custom Ollama server URL")
     ollama_model: Optional[str] = Field(None, description="Optional custom Ollama model name")
 
@@ -367,6 +385,12 @@ class PodcastCompareRequest(BaseModel):
         description="Exactly two production_genre template ids",
     )
     settings: Optional[SpeechSettings] = Field(default_factory=SpeechSettings, description="Speech generation settings")
+    llm_provider: Literal["ollama", "openai"] = Field(
+        default="ollama",
+        description="LLM for script segmentation (Director still uses Ollama)",
+    )
+    openai_api_key: Optional[str] = Field(None, description="OpenAI API key when llm_provider is openai")
+    openai_model: Optional[str] = Field(None, description="OpenAI model id when llm_provider is openai")
     ollama_url: Optional[str] = Field(None, description="Optional Ollama URL for Director")
     ollama_model: Optional[str] = Field(None, description="Optional Ollama model")
     genre: Optional[str] = Field(None, description="Optional metadata for segmentation")

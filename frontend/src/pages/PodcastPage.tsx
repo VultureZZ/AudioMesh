@@ -150,6 +150,15 @@ export function PodcastPage() {
       voices: selectedVoices,
       genre,
       duration,
+      llm_provider: settings.primaryLlmProvider ?? 'ollama',
+      openai_api_key:
+        settings.primaryLlmProvider === 'openai'
+          ? settings.openaiApiKey || undefined
+          : undefined,
+      openai_model:
+        settings.primaryLlmProvider === 'openai'
+          ? settings.openaiModel || undefined
+          : undefined,
       ollama_url: settings.ollamaServerUrl,
       ollama_model: settings.ollamaModel,
     });
@@ -204,6 +213,15 @@ export function PodcastPage() {
         production_mode: true,
         style: productionStyle,
         enabled_cues: enabledCues,
+        llm_provider: settings.primaryLlmProvider ?? 'ollama',
+        openai_api_key:
+          settings.primaryLlmProvider === 'openai'
+            ? settings.openaiApiKey || undefined
+            : undefined,
+        openai_model:
+          settings.primaryLlmProvider === 'openai'
+            ? settings.openaiModel || undefined
+            : undefined,
         ollama_url: settings.ollamaServerUrl,
         ollama_model: settings.ollamaModel,
       });

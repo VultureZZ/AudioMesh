@@ -92,6 +92,8 @@ export interface HealthCheckResponse {
   version: string;
 }
 
+export type LlmProvider = 'ollama' | 'openai';
+
 export interface PodcastScriptRequest {
   url: string;
   voices: string[];
@@ -100,6 +102,9 @@ export interface PodcastScriptRequest {
   duration?: string;
   /** Target episode length in minutes; drives script length (takes precedence over duration when set). */
   approximate_duration_minutes?: number;
+  llm_provider?: LlmProvider;
+  openai_api_key?: string;
+  openai_model?: string;
   ollama_url?: string;
   ollama_model?: string;
   /** When true, script may include [CUE: ...] markers for production mixing (default false). */
@@ -171,6 +176,9 @@ export interface PodcastProductionRequest extends PodcastGenerateRequest {
   production_genre?: ProductionGenre;
   style?: 'tech_talk' | 'casual' | 'news' | 'storytelling';
   enabled_cues?: ('intro' | 'outro' | 'transitions' | 'bed')[];
+  llm_provider?: LlmProvider;
+  openai_api_key?: string;
+  openai_model?: string;
   ollama_url?: string;
   ollama_model?: string;
 }

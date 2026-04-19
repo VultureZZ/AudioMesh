@@ -278,10 +278,14 @@ def _mono_from_stereo(ch2: np.ndarray) -> np.ndarray:
 
 
 def _resample_linear(x: np.ndarray, orig_sr: int, target_sr: int) -> np.ndarray:
+    if x.shape[1] == 0:
+        return np.zeros((x.shape[0], 0), dtype=np.float32)
     if orig_sr == target_sr:
         return x
     n_src = x.shape[1]
     n_dst = int(round(n_src * target_sr / orig_sr))
+    if n_dst <= 0:
+        return np.zeros((x.shape[0], 0), dtype=np.float32)
     t_src = np.linspace(0.0, 1.0, num=n_src, endpoint=False)
     t_dst = np.linspace(0.0, 1.0, num=n_dst, endpoint=False)
     out = np.zeros((x.shape[0], n_dst), dtype=np.float32)
@@ -412,6 +416,9 @@ class ProductionMixer:
                 ev_samples = _resample_linear(ev_samples, ev_sr, sr)
                 dur = int(ev.duration_ms)
                 ev_samples = ev_samples[:, : min(ev_samples.shape[1], int(dur * sr / 1000.0))]
+                if ev_samples.shape[1] == 0:
+                    logger.warning("Skip empty asset audio after trim/resample: %s", apath)
+                    continue
                 ev_samples = _apply_fades(ev_samples, int(ev.fade_in_ms), int(ev.fade_out_ms))
                 g_db = float(ev.volume_db or 0.0)
                 g_lin_scalar = float(10.0 ** (g_db / 20.0))
@@ -438,16 +445,23 @@ class ProductionMixer:
                 ev_samples[0, :] *= gl * g_lin_scalar * auto_lin
                 ev_samples[1, :] *= gr * g_lin_scalar * auto_lin
 
-                start = int(ev.start_ms * sr / 1000.0)
+                start = max(0, int(ev.start_ms * sr / 1000.0))
                 end = min(total_samps, start + n_ev)
+                if end <= start:
+                    continue
 
                 region = slice(start, end)
                 mix_slice = ev_samples[:, : end - start]
 
                 if role in ("music_bed", "music_transition", "music_intro", "music_outro"):
                     seg_len = mix_slice.shape[1]
+                    if seg_len == 0:
+                        continue
                     vad_seg = vad[region]
-                    if vad_seg.shape[0] != seg_len:
+                    if vad_seg.shape[0] == 0:
+                        # No speech timeline in this region (e.g., cue after VO ends): keep full music level.
+                        vad_seg = np.zeros(seg_len, dtype=np.float32)
+                    elif vad_seg.shape[0] != seg_len:
                         vad_seg = np.interp(
                             np.linspace(0, 1, seg_len),
                             np.linspace(0, 1, vad_seg.shape[0]),

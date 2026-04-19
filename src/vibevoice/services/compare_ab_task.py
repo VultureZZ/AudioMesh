@@ -21,12 +21,15 @@ async def run_compare_ab_task(
     voices: List[str],
     genre_a: str,
     genre_b: str,
-    ollama_url: Optional[str],
-    ollama_model: Optional[str],
     genre_label: str,
     duration: Optional[str],
     style: str,
     set_status: Callable[..., None],
+    ollama_url: Optional[str] = None,
+    ollama_model: Optional[str] = None,
+    llm_provider: str = "ollama",
+    openai_api_key: Optional[str] = None,
+    openai_model: Optional[str] = None,
 ) -> None:
     """Run two full production branches (Director + assets + mix) sharing TTS and library."""
     from app.services.asset_library import AssetLibrary
@@ -51,6 +54,9 @@ async def run_compare_ab_task(
                 script,
                 ollama_url,
                 ollama_model,
+                llm_provider=llm_provider,
+                openai_api_key=openai_api_key,
+                openai_model=openai_model,
                 num_voices=len(voices),
                 genre=genre_label,
                 genre_style=production_style_to_genre_style(style) or genre_label or "General",

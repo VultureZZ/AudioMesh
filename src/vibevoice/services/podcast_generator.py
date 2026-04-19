@@ -111,6 +111,9 @@ class PodcastGenerator:
         ollama_model: Optional[str] = None,
         approximate_duration_minutes: Optional[float] = None,
         include_production_cues: bool = False,
+        llm_provider: Optional[str] = None,
+        openai_api_key: Optional[str] = None,
+        openai_model: Optional[str] = None,
     ) -> str:
         """
         Generate podcast script from article URL.
@@ -123,6 +126,9 @@ class PodcastGenerator:
             ollama_url: Optional custom Ollama server URL
             ollama_model: Optional custom Ollama model name
             approximate_duration_minutes: Optional target length in minutes for word-count targeting
+            llm_provider: ``ollama`` (default) or ``openai``
+            openai_api_key: Required when llm_provider is openai
+            openai_model: Optional OpenAI model id when llm_provider is openai
 
         Returns:
             Generated podcast script with speaker labels
@@ -165,34 +171,57 @@ class PodcastGenerator:
                 voice_profiles[voice_name] = profile
                 logger.info(f"Loaded profile for voice: {voice_name}")
 
-        # Step 3: Generate script with Ollama
-        logger.info("Step 3: Generating script with Ollama...")
-        if ollama_url or ollama_model:
-            # Create temporary client with custom settings
-            from .ollama_client import OllamaClient
+        provider = (llm_provider or "ollama").strip().lower()
+        if provider not in ("ollama", "openai"):
+            raise ValueError(f"Unsupported llm_provider: {llm_provider}")
 
-            custom_client = OllamaClient(base_url=ollama_url, model=ollama_model)
-            script = custom_client.generate_script(
+        # Step 3: Generate script (Ollama or OpenAI)
+        if provider == "openai":
+            key = (openai_api_key or "").strip()
+            if not key:
+                raise ValueError("openai_api_key is required when llm_provider is openai")
+            from .openai_text_client import generate_script_openai
+
+            logger.info("Step 3: Generating script with OpenAI...")
+            script = generate_script_openai(
                 article_text,
                 genre,
                 duration,
                 num_voices,
+                api_key=key,
+                model=openai_model,
                 voice_profiles=voice_profiles if voice_profiles else None,
                 voice_names=voices,
                 approximate_duration_minutes=approximate_duration_minutes,
                 include_production_cues=include_production_cues,
             )
         else:
-            script = self.ollama.generate_script(
-                article_text,
-                genre,
-                duration,
-                num_voices,
-                voice_profiles=voice_profiles if voice_profiles else None,
-                voice_names=voices,
-                approximate_duration_minutes=approximate_duration_minutes,
-                include_production_cues=include_production_cues,
-            )
+            logger.info("Step 3: Generating script with Ollama...")
+            if ollama_url or ollama_model:
+                from .ollama_client import OllamaClient
+
+                custom_client = OllamaClient(base_url=ollama_url, model=ollama_model)
+                script = custom_client.generate_script(
+                    article_text,
+                    genre,
+                    duration,
+                    num_voices,
+                    voice_profiles=voice_profiles if voice_profiles else None,
+                    voice_names=voices,
+                    approximate_duration_minutes=approximate_duration_minutes,
+                    include_production_cues=include_production_cues,
+                )
+            else:
+                script = self.ollama.generate_script(
+                    article_text,
+                    genre,
+                    duration,
+                    num_voices,
+                    voice_profiles=voice_profiles if voice_profiles else None,
+                    voice_names=voices,
+                    approximate_duration_minutes=approximate_duration_minutes,
+                    include_production_cues=include_production_cues,
+                )
 
         logger.info(f"Generated script: {len(script)} characters")
         return script
@@ -209,6 +238,9 @@ class PodcastGenerator:
         ollama_model: Optional[str] = None,
         approximate_duration_minutes: Optional[float] = None,
         include_production_cues: bool = False,
+        llm_provider: Optional[str] = None,
+        openai_api_key: Optional[str] = None,
+        openai_model: Optional[str] = None,
     ) -> str:
         """
         Generate podcast script from raw article text (same pipeline as URL-based generation, without scraping).
@@ -253,7 +285,30 @@ class PodcastGenerator:
                 voice_profiles[voice_name] = profile
                 logger.info("Loaded profile for voice: %s", voice_name)
 
-        if ollama_url or ollama_model:
+        provider = (llm_provider or "ollama").strip().lower()
+        if provider not in ("ollama", "openai"):
+            raise ValueError(f"Unsupported llm_provider: {llm_provider}")
+
+        if provider == "openai":
+            key = (openai_api_key or "").strip()
+            if not key:
+                raise ValueError("openai_api_key is required when llm_provider is openai")
+            from .openai_text_client import generate_script_openai
+
+            script = generate_script_openai(
+                combined,
+                genre,
+                duration,
+                num_voices,
+                api_key=key,
+                model=openai_model,
+                voice_profiles=voice_profiles if voice_profiles else None,
+                voice_names=voices,
+                narrator_speaker_index=narrator_speaker_index,
+                approximate_duration_minutes=approximate_duration_minutes,
+                include_production_cues=include_production_cues,
+            )
+        elif ollama_url or ollama_model:
             from .ollama_client import OllamaClient
 
             custom_client = OllamaClient(base_url=ollama_url, model=ollama_model)
@@ -339,6 +394,9 @@ class PodcastGenerator:
         ollama_url: Optional[str] = None,
         ollama_model: Optional[str] = None,
         *,
+        llm_provider: Optional[str] = None,
+        openai_api_key: Optional[str] = None,
+        openai_model: Optional[str] = None,
         estimated_duration_seconds: Optional[float] = None,
         num_voices: Optional[int] = None,
         genre: Optional[str] = None,
@@ -370,6 +428,27 @@ class PodcastGenerator:
             genre=g or "General",
             genre_style=gs or "General",
         )
+
+        provider = (llm_provider or "ollama").strip().lower()
+        if provider not in ("ollama", "openai"):
+            raise ValueError(f"Unsupported llm_provider: {llm_provider}")
+
+        if provider == "openai":
+            key = (openai_api_key or "").strip()
+            if not key:
+                raise ValueError("openai_api_key is required when llm_provider is openai")
+            from .openai_text_client import generate_script_segments_openai
+
+            try:
+                return generate_script_segments_openai(
+                    script,
+                    api_key=key,
+                    model=openai_model,
+                    **seg_kw,
+                )
+            except Exception as exc:
+                logger.warning("Falling back to deterministic script segmentation: %s", exc)
+                return self._fallback_segments_from_script(script)
 
         try:
             if ollama_url or ollama_model:
